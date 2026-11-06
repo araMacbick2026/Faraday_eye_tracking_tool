@@ -64,7 +64,7 @@ async function startCamera(){
 }
 const R=window.Reliability;
 Object.assign(state,{sequence:0,frameSequence:0,face:null,stableSince:0,pose:null,baseline:null,preChecks:[],postCheck:null,story:null,invalidated:false,interruptions:[],calibrationLog:[],validationHistory:[],lastPredictionId:0});
-let collecting=false,calSamples=0,calLastFrame=0,calLastAt=0,calSettle=0,calLastProgressAt=0,calPointStarted=0,checkPurpose='pre',checkIndex=0,checkStarted=0,checkLastSlot=-1,checkLastId=0,recordNext=50,badSince=0;
+let collecting=false,calSamples=0,calLastFrame=0,calLastAt=0,calSettle=0,calLastProgressAt=0,calPointStarted=0,calAnchor=null,movementSince=0,checkPurpose='pre',checkIndex=0,checkStarted=0,checkLastSlot=-1,checkLastId=0,recordNext=50,badSince=0;
 const now=()=>performance.now();
 function ingest(data){
  if(state.mode!=='camera')return;
@@ -85,7 +85,7 @@ function installFaceMonitor(){
  };
 }
 function faceReady(){return state.mode==='pointer'||!!(state.face&&now()-state.face.t<600&&now()-state.stableSince>=600);}
-function headMoved(){return state.mode==='camera'&&state.face&&state.baseline&&R.movement(state.baseline,state.face);}
+function headMoved(){return state.mode==='camera'&&state.face&&state.baseline&&R.positionChanged(state.baseline,state.face);}
 function startMode(mode){if(mode==='pointer')stopCamera();state.mode=mode;state.latest=null;state.preChecks=[];state.invalidated=false;$('#modeBadge').textContent=mode==='camera'?'LIVE WEBCAM':'POINTER REHEARSAL';$('#source').textContent=mode==='camera'?'Webcam estimate':'Pointer (not gaze)';showCalibrationIntro();}
 document.addEventListener('pointermove',e=>{if(state.mode==='pointer')state.latest={x:e.clientX,y:e.clientY,t:now(),id:++state.sequence};});
 function pointerPrediction(){const p=state.latest;return p?{...p,t:now(),id:++state.sequence}:null;}
@@ -97,8 +97,8 @@ function beginCalibration(){
  state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};state.validation=null;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.invalidated=false;state.baseline=null;state.calibrationLog=[];
  $('#accuracy').textContent='—';if(state.mode==='camera')webgazer.clearData();calIndex=0;calSamples=0;collecting=false;$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
 }
-function calTarget(){showCalibrationControls();collecting=false;calSamples=0;calLastFrame=0;placeTarget(calibration[calIndex]);$('#target').textContent='+';$('#targetInstruction').textContent=`Calibration ${calIndex+1}/9 · Click once, then look steadily`;$('#targetProgress').textContent='Click the target to begin collecting';}
-function clickCalibration(){if(collecting)return;collecting=true;state.trackerError=null;calPointStarted=now();calLastProgressAt=now();calSettle=now()+700;calLastAt=0;$('#target').textContent='·';}
+function calTarget(){showCalibrationControls();collecting=false;calAnchor=null;calSamples=0;calLastFrame=0;placeTarget(calibration[calIndex]);$('#target').textContent='+';$('#targetInstruction').textContent=`Calibration ${calIndex+1}/9 · Click once, then look steadily`;$('#targetProgress').textContent='Click the target to begin collecting';}
+function clickCalibration(){if(collecting)return;collecting=true;state.trackerError=null;calPointStarted=now();calAnchor=null;calLastProgressAt=now();calSettle=now()+700;calLastAt=0;$('#target').textContent='·';}
 function showCalibrationControls(){
  let controls=document.getElementById('calibrationControls');
  if(!controls){controls=document.createElement('div');controls.id='calibrationControls';controls.className='calibration-controls';controls.innerHTML='<button id="restartCalibration">Restart all 9 points</button><button id="reconnectCalibration">Reconnect camera</button><button id="exitCalibration">Cancel calibration</button>';$('#overlay').appendChild(controls);}
@@ -114,8 +114,10 @@ function collectCalibration(){
  if(state.trackerError){calibrationStatus('Tracker interrupted · Reconnect the camera');return;}
  if(state.mode==='camera'&&(!state.face||now()-state.face.t>=600)){calibrationStatus('No fresh eye frames · Face the camera. Reconnect if this persists.');return;}
  if(!faceReady()){calibrationStatus('Face moving · Hold your head steady');return;}
- if(state.mode==='camera'&&!state.baseline)state.baseline={...state.face};
- if(headMoved()){collecting=false;state.invalidated=true;calibrationStatus('Position changed · Restart all 9 points');return;}
+ if(state.mode==='camera'){
+  if(!calAnchor)calAnchor={...state.face};
+  else if(R.movement(calAnchor,state.face)){calAnchor={...state.face};calSettle=now()+650;calibrationStatus('Settling at this target · Hold comfortably still');return;}
+ }
  if(now()-calLastAt<130)return;
  if(state.mode==='camera'&&state.face.id===calLastFrame){calibrationStatus('Waiting for a new eye frame · Keep looking at the target');return;}
  const pt=calibration[calIndex],x=pt[0]*innerWidth,y=pt[1]*innerHeight;
@@ -137,14 +139,14 @@ function collectValidation(){
  const elapsed=now()-checkStarted;if(elapsed>=4000){activeValidation.missing=60-activeValidation.errors.length;validationRows.push(activeValidation);activeValidation=null;checkIndex++;startCheckTarget();return;}
  if(elapsed<1000)return;
  const slot=Math.min(59,Math.floor((elapsed-1000)/50));if(slot===checkLastSlot)return;checkLastSlot=slot;
- const p=fresh();if(p&&p.id!==checkLastId&&faceReady()&&!headMoved()){checkLastId=p.id;activeValidation.errors.push(Math.hypot(p.x-activeValidation.target.x,p.y-activeValidation.target.y));activeValidation.uniquePredictions.push(p.id);}
+ const p=fresh();if(p&&p.id!==checkLastId&&faceReady()){checkLastId=p.id;activeValidation.errors.push(Math.hypot(p.x-activeValidation.target.x,p.y-activeValidation.target.y));activeValidation.uniquePredictions.push(p.id);}
  $('#targetProgress').textContent=`${Math.ceil((4000-elapsed)/1000)}s remaining · ${activeValidation.errors.length} fresh predictions`;
 }
 function checkTable(v){return `<table class="quality-table"><thead><tr><th>Target</th><th>Median</th><th>90th %</th><th>Coverage</th><th>Result</th></tr></thead><tbody>${v.targets.map(r=>`<tr><td>${r.point}</td><td>${fmt(r.median)}</td><td>${fmt(r.p90)}</td><td>${Math.round(r.coverage*100)}%</td><td>${r.pass?'Pass':'Repeat'}</td></tr>`).join('')}</tbody></table>`;}
 function finishValidation(){
  const result={...R.summarize(validationRows),purpose:checkPurpose,mode:state.mode,checkedAt:new Date().toISOString(),viewport:state.viewport};state.validationHistory.push(result);
  if(checkPurpose==='post'){state.postCheck=result;renderReview();return;}
- if(result.pass)state.preChecks.push(result);else state.preChecks=[];
+ if(result.pass){state.preChecks.push(result);state.baseline=state.face?{...state.face}:null;}else state.preChecks=[];
  state.validation=result;$('#accuracy').textContent=fmt(result.median);phase('validated',3);
  const ready=state.preChecks.length>=2;
  setDesk(`<div class="welcome"><div class="eyebrow">${state.mode==='pointer'?'POINTER REHEARSAL / ':''}${result.pass?'CHECK PASSED':'QUALITY GATE FAILED'}</div><h2>${!result.pass?'Recalibrate before recording.':ready?'Two checks complete.':'A second check confirms consistency.'}</h2>${checkTable(result)}<p>${state.mode==='pointer'?'These are pointer measurements, not webcam reliability results. ':''}Thresholds apply to every target, not just the overall median. Failed checks reset the consecutive-check count.</p><div class="actions">${result.pass?`<button class="solid" id="nextCheck">${ready?'Choose a story':'Run second check'} →</button>`:''}<button class="secondary" id="recalibrate">Recalibrate</button>${state.mode==='pointer'&&!result.pass?'<button class="secondary" id="demoContinue">Preview story (rehearsal only)</button>':''}</div></div>`);
@@ -166,7 +168,7 @@ function inside(p,r){return p.x>=r.x&&p.x<=r.x+r.width&&p.y>=r.y&&p.y<=r.y+r.hei
 function captureLayout(){state.activityRect=rectJSON($('#activity').getBoundingClientRect());state.regions=[...document.querySelectorAll('[data-region]')].map(e=>({name:e.dataset.region,rect:rectJSON(e.getBoundingClientRect())}));}
 function startRecording(){
  if(state.mode==='camera'&&(state.preChecks.length<2||!faceReady()||headMoved())){message('○ Face not steady or position changed · recalibrate');showCalibrationIntro();return;}
- state.samples=[];state.elapsed=0;state.postCheck=null;state.interruptions=[];state.invalidated=false;state.lastPredictionId=0;recordNext=50;badSince=0;
+ state.samples=[];state.elapsed=0;state.postCheck=null;state.interruptions=[];state.invalidated=false;state.lastPredictionId=0;recordNext=50;badSince=0;movementSince=0;
  $('#activity').scrollIntoView({block:'center'});captureLayout();state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};
  state.running=true;phase('recording',4);$('#start').outerHTML='<button class="secondary" id="pause">Pause</button><button class="solid" id="finish">Finish & check drift →</button><span id="clock">00:45</span>';$('#shuffle').hidden=true;$('#redo').hidden=true;
  $('#pause').onclick=togglePause;$('#finish').onclick=finish;lastTick=now();message('● Recording unique predictions');
@@ -182,8 +184,8 @@ function tick(time){
   while(recordNext<=state.elapsed){addRecordingSlot(recordNext,state.elapsed-recordNext>=100);recordNext+=50;}
   $('#sampleCount').textContent=state.samples.filter(s=>s.valid).length;
   if($('#clock'))$('#clock').textContent='00:'+String(Math.max(0,Math.ceil((45000-state.elapsed)/1000))).padStart(2,'0');
-  if(headMoved()){state.invalidated=true;pauseRecording('Head position changed · finish and recalibrate');}
-  else if(!faceReady()||!fresh()){if(!badSince)badSince=time;if(time-badSince>900)pauseRecording('Signal lost · face the camera before resuming');}else badSince=0;
+  if(headMoved()){if(!movementSince)movementSince=time;if(time-movementSince>=R.limits.positionSustainedMs){state.invalidated=true;pauseRecording('Sustained position change · finish and recalibrate');}}else movementSince=0;
+  if(!faceReady()||!fresh()){if(!badSince)badSince=time;if(time-badSince>900)pauseRecording('Signal lost · face the camera before resuming');}else badSince=0;
   if(state.elapsed>=45000)finish();
  }
  lastTick=time;state.raf=requestAnimationFrame(tick);

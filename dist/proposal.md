@@ -39,3 +39,7 @@ Do not infer attention, emotion, diagnosis, comprehension or learning outcomes f
 
 ## Technical handoff
 Static HTML/CSS/JavaScript with no app backend or paid API key. Serve dist over localhost or HTTPS; for example run `python -m http.server 4173 --bind 127.0.0.1` inside dist. Camera permission is required; an embedded browser may deny it. Run `node camera.test.mjs` from the project folder for automated regression checks. Source: dist/app.js, dist/reliability.js, dist/stories.js and dist/style.css. Vendored tracker and project: https://webgazer.cs.brown.edu/ . Preserve embedded notices and review licensing before commercial distribution.
+
+
+## Calibration movement correction — v0.2.2
+Removed first-target absolute-pose rejection during calibration and validation. Each calibration target establishes a local pose; within-target movement pauses for settling and resumes, retaining accepted stable samples. Independent target-error checks still decide measurement quality. Recording uses a provisional large-position-change proxy (normalized displacement >0.12 or eye-distance scale change >35%, sustained for 1000 ms); smaller shifts no longer immediately invalidate a session. These movement limits are exported as engineering heuristics, not validated head-pose measurements. Automated regression tests now complete nine simulated webcam targets with different stable poses, reproduce within-target movement/recovery, and retain invalidation for sustained large movement. Human webcam performance remains unverified for this patch.
