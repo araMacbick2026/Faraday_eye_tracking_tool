@@ -23,3 +23,19 @@ const success=environment();await vm.runInContext('startCamera()',success.contex
 vm.runInContext('stopCamera()',success.context);assert.equal(success.stats().stopped,1);
 for(const name of ['face_mesh.binarypb','face_mesh_solution_packed_assets_loader.js','face_mesh_solution_packed_assets.data','face_mesh_solution_simd_wasm_bin.js','face_mesh_solution_simd_wasm_bin.wasm','face_mesh_solution_wasm_bin.js','face_mesh_solution_wasm_bin.wasm'])assert.ok(fs.statSync('dist/mediapipe/face_mesh/'+name).size>100);
 console.log('Passed: camera error recovery (5 cases), unavailable API, blocked policy, startup configuration, stream cleanup, and 7 required bundled assets.');
+
+// The preview must never cover calibration target 7 in the bottom-left corner.
+const css=fs.readFileSync('dist/style.css','utf8');
+const overlayLayer=Number(css.match(/#overlay\{[^}]*z-index:(\d+)/)[1]);
+const previewLayer=Number(css.match(/#webgazerVideoContainer\{[^}]*z-index:(\d+)/)[1]);
+assert.ok(overlayLayer>previewLayer,'Calibration must cover the camera preview');
+const calibrationRun=environment();
+vm.runInContext("state.mode='pointer';beginCalibration()",calibrationRun.context);
+for(let point=0;point<9;point++){
+ assert.match(calibrationRun.get('#targetInstruction').textContent,new RegExp('Calibration '+(point+1)+'/9'));
+ for(let click=0;click<5;click++)vm.runInContext('clickCalibration({})',calibrationRun.context);
+}
+assert.equal(vm.runInContext('state.calibrated',calibrationRun.context),true);
+assert.equal(calibrationRun.get('#overlay').hidden,true);
+assert.equal(calibrationRun.get('#calStatus').textContent,'Rehearsed 9/9');
+console.log('Passed: all 9 calibration targets / 45 clicks, including points 7–9; calibration layer above camera preview.');
