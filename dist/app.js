@@ -64,7 +64,7 @@ async function startCamera(){
 }
 const R=window.Reliability;
 Object.assign(state,{sequence:0,frameSequence:0,face:null,stableSince:0,pose:null,baseline:null,preChecks:[],postCheck:null,story:null,invalidated:false,interruptions:[],calibrationLog:[],validationHistory:[],lastPredictionId:0});
-let collecting=false,calSamples=0,calLastFrame=0,calLastAt=0,calSettle=0,checkPurpose='pre',checkIndex=0,checkStarted=0,checkLastSlot=-1,checkLastId=0,recordNext=50,badSince=0;
+let collecting=false,calSamples=0,calLastFrame=0,calLastAt=0,calSettle=0,calLastProgressAt=0,calPointStarted=0,checkPurpose='pre',checkIndex=0,checkStarted=0,checkLastSlot=-1,checkLastId=0,recordNext=50,badSince=0;
 const now=()=>performance.now();
 function ingest(data){
  if(state.mode!=='camera')return;
@@ -74,9 +74,9 @@ function installFaceMonitor(){
  const tracker=webgazer.getTracker();if(tracker.faradayWrapped)return;
  const original=tracker.getEyePatches;tracker.faradayWrapped=true;
  tracker.getEyePatches=async function(...args){
-  let patches;try{patches=await original.apply(this,args);}catch(error){state.face=null;throw error;}
+  let patches;try{patches=await original.apply(this,args);}catch(error){state.face=null;state.trackerError=error?.message||'Face tracking interrupted';return null;}
   const p=this.getPositions?.();const canvas=args[1];
-  if(patches&&p?.[263]&&canvas?.width&&canvas?.height){
+  if(patches&&p?.[263]&&canvas?.width&&canvas?.height){state.trackerError=null;
    const pose={x:p[1][0]/canvas.width,y:p[1][1]/canvas.height,scale:Math.hypot(p[33][0]-p[263][0],p[33][1]-p[263][1])/canvas.width};
    if(!state.pose||R.movement(state.pose,pose))state.stableSince=now();
    state.pose=pose;state.face={...pose,t:now(),id:++state.frameSequence};
@@ -97,20 +97,34 @@ function beginCalibration(){
  state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};state.validation=null;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.invalidated=false;state.baseline=null;state.calibrationLog=[];
  $('#accuracy').textContent='—';if(state.mode==='camera')webgazer.clearData();calIndex=0;calSamples=0;collecting=false;$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
 }
-function calTarget(){collecting=false;calSamples=0;calLastFrame=0;placeTarget(calibration[calIndex]);$('#target').textContent='+';$('#targetInstruction').textContent=`Calibration ${calIndex+1}/9 · Click once, then look steadily`;$('#targetProgress').textContent='Click the target to begin collecting';}
-function clickCalibration(){if(collecting)return;collecting=true;calSettle=now()+700;calLastAt=0;$('#target').textContent='·';}
+function calTarget(){showCalibrationControls();collecting=false;calSamples=0;calLastFrame=0;placeTarget(calibration[calIndex]);$('#target').textContent='+';$('#targetInstruction').textContent=`Calibration ${calIndex+1}/9 · Click once, then look steadily`;$('#targetProgress').textContent='Click the target to begin collecting';}
+function clickCalibration(){if(collecting)return;collecting=true;state.trackerError=null;calPointStarted=now();calLastProgressAt=now();calSettle=now()+700;calLastAt=0;$('#target').textContent='·';}
+function showCalibrationControls(){
+ let controls=document.getElementById('calibrationControls');
+ if(!controls){controls=document.createElement('div');controls.id='calibrationControls';controls.className='calibration-controls';controls.innerHTML='<button id="restartCalibration">Restart all 9 points</button><button id="reconnectCalibration">Reconnect camera</button><button id="exitCalibration">Cancel calibration</button>';$('#overlay').appendChild(controls);}
+ controls.hidden=false;
+ $('#restartCalibration').onclick=beginCalibration;$('#reconnectCalibration').onclick=reset;$('#exitCalibration').onclick=cancelTargets;
+}
+function hideCalibrationControls(){const controls=document.getElementById('calibrationControls');if(controls)controls.hidden=true;}
+function calibrationStatus(text){$('#targetProgress').textContent=`${calSamples}/15 samples · ${text}`;}
 function collectCalibration(){
- if(!collecting||state.phase!=='calibration'||$('#overlay').hidden||now()<calSettle)return;
- if(!faceReady()){calSettle=now()+200;$('#targetProgress').textContent='Paused · Face the camera and hold steady';return;}
- if(state.mode==='camera'&&!state.baseline)state.baseline={...state.face};if(headMoved()){collecting=false;state.invalidated=true;showCalibrationIntro();message('○ Position changed during calibration · restart all nine points');return;}if(now()-calLastAt<130)return;
- if(state.mode==='camera'&&state.face.id===calLastFrame)return;
+ if(!collecting||state.phase!=='calibration'||$('#overlay').hidden)return;
+ if(now()-calLastProgressAt>=15000){collecting=false;$('#target').textContent='!';calibrationStatus('Collection stopped. Restart calibration, or reconnect the camera if it keeps stopping.');return;}
+ if(now()<calSettle)return;
+ if(state.trackerError){calibrationStatus('Tracker interrupted · Reconnect the camera');return;}
+ if(state.mode==='camera'&&(!state.face||now()-state.face.t>=600)){calibrationStatus('No fresh eye frames · Face the camera. Reconnect if this persists.');return;}
+ if(!faceReady()){calibrationStatus('Face moving · Hold your head steady');return;}
+ if(state.mode==='camera'&&!state.baseline)state.baseline={...state.face};
+ if(headMoved()){collecting=false;state.invalidated=true;calibrationStatus('Position changed · Restart all 9 points');return;}
+ if(now()-calLastAt<130)return;
+ if(state.mode==='camera'&&state.face.id===calLastFrame){calibrationStatus('Waiting for a new eye frame · Keep looking at the target');return;}
  const pt=calibration[calIndex],x=pt[0]*innerWidth,y=pt[1]*innerHeight;
- if(state.mode==='camera'){webgazer.recordScreenPosition(x,y,'click');calLastFrame=state.face.id;}
- calLastAt=now();calSamples++;$('#targetProgress').textContent=`${calSamples}/15 stable samples · Keep looking at the centre`;
- if(calSamples===15){state.calibrationLog.push({point:calIndex+1,x,y,samples:calSamples});calIndex++;collecting=false;if(calIndex===9){$('#overlay').hidden=true;state.calibrated=true;state.baseline=state.face?{...state.face}:null;$('#calStatus').textContent='9/9 · 135 samples';showValidationIntro();}else calTarget();}
+ if(state.mode==='camera'){try{webgazer.recordScreenPosition(x,y,'click');}catch(error){collecting=false;state.trackerError=error?.message;calibrationStatus('Training interrupted · Restart calibration or reconnect');return;}calLastFrame=state.face.id;}
+ calLastAt=now();calLastProgressAt=now();calSamples++;calibrationStatus('Keep looking at the centre');
+ if(calSamples===15){state.calibrationLog.push({point:calIndex+1,x,y,samples:calSamples});calIndex++;collecting=false;if(calIndex===9){hideCalibrationControls();$('#overlay').hidden=true;state.calibrated=true;state.baseline=state.face?{...state.face}:null;$('#calStatus').textContent='9/9 · 135 samples';showValidationIntro();}else calTarget();}
 }
 function showValidationIntro(){phase('validation',3);setDesk(`<div class="welcome"><div class="eyebrow">02 / INDEPENDENT CHECKS</div><h2>Check twice. Then observe.</h2><p>Run two separate five-target checks. Look at each target for four seconds without clicking. These measurements never train the model.</p><p>Each target needs median error ≤120 px, 90th-percentile error ≤200 px, ≥70% fresh-sample coverage, and ≥10 unique predictions. These are provisional engineering criteria for broad regions.</p><div class="actions"><button class="solid" id="validate">Run check ${state.preChecks.length+1} of 2 →</button><button class="secondary" id="recalibrate">Recalibrate</button></div></div>`);$('#validate').onclick=()=>beginValidation('pre');$('#recalibrate').onclick=showCalibrationIntro;}
-function beginValidation(purpose='pre'){checkPurpose=purpose;validationRows=[];checkIndex=0;phase(purpose==='post'?'postcheck':'validation',purpose==='post'?5:3);$('#overlay').hidden=false;$('#target').disabled=true;$('#target').textContent='·';$('#target').onclick=null;startCheckTarget();}
+function beginValidation(purpose='pre'){hideCalibrationControls();checkPurpose=purpose;validationRows=[];checkIndex=0;phase(purpose==='post'?'postcheck':'validation',purpose==='post'?5:3);$('#overlay').hidden=false;$('#target').disabled=true;$('#target').textContent='·';$('#target').onclick=null;startCheckTarget();}
 function startCheckTarget(){
  if(checkIndex===checks.length){activeValidation=null;$('#overlay').hidden=true;finishValidation();return;}
  const pt=checks[checkIndex];placeTarget(pt);checkStarted=now();checkLastSlot=-1;checkLastId=0;
@@ -192,9 +206,9 @@ function drawHeatmap(){const c=$('#heatmap'),r=state.activityRect;c.width=r.widt
 function sessionReport(){return{schema:'faraday.observatory.v2',exportedAt:new Date().toISOString(),mode:state.mode,nonclinical:true,quality:sessionQuality(),thresholds:R.limits,story:state.story,calibration:state.calibrationLog,validationHistory:state.validationHistory,preChecks:state.preChecks,lastPreCheck:state.validation,postCheck:state.postCheck,positionInvalidated:state.invalidated,interruptions:state.interruptions,duration_ms:Math.round(state.elapsed),sampleIntervalTarget_ms:50,freshSampleCoverage:coverage(),viewport:state.viewport,activityRect:state.activityRect,regions:state.regions,samples:state.samples,limitations:'Engineering heuristics for adult exploratory use. No clinical, attention, fixation, or comprehension inference. Face movement proxy is not a calibrated head pose. Repeated estimates are excluded from fresh coverage.'};}
 function exportContent(type){const report=sessionReport(),keys=['t_ms','prediction_id','prediction_age_ms','x','y','valid','reason','offscreen','activity_x','activity_y','region'];return type==='json'?JSON.stringify(report,null,2):['mode,quality,story_id,'+keys.join(','),...state.samples.map(s=>[state.mode,report.quality,state.story.id,...keys.map(k=>s[k]??'')].join(','))].join('\n');}
 function download(type){const url=URL.createObjectURL(new Blob([exportContent(type)],{type:type==='json'?'application/json':'text/csv'}));const a=document.createElement('a');a.href=url;a.download=`faraday-${state.mode}-${state.story.id}-${Date.now()}.${type}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-function cancelTargets(){collecting=false;activeValidation=null;$('#overlay').hidden=true;if(checkPurpose==='post'&&state.phase==='postcheck'){state.postCheck=null;renderReview();}else if(state.phase==='calibration')showCalibrationIntro();else showValidationIntro();}
+function cancelTargets(){hideCalibrationControls();collecting=false;activeValidation=null;$('#overlay').hidden=true;if(checkPurpose==='post'&&state.phase==='postcheck'){state.postCheck=null;renderReview();}else if(state.phase==='calibration')showCalibrationIntro();else showValidationIntro();}
 $('#cancelTarget').onclick=cancelTargets;
-function reset(){state.epoch++;collecting=false;activeValidation=null;state.running=false;if(window.webgazer)webgazer.clearData();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='NO SESSION';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('○ Cleared · camera disconnected');}
+function reset(){hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;if(window.webgazer)webgazer.clearData();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='NO SESSION';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('○ Cleared · camera disconnected');}
 window.addEventListener('resize',()=>{if(!state.mode)return;state.invalidated=true;state.calibrated=false;state.preChecks=[];collecting=false;activeValidation=null;$('#overlay').hidden=true;$('#calStatus').textContent='Window changed';if(['review','postcheck','post-intro'].includes(state.phase)){state.postCheck=null;renderReview();}else if(['recording','paused'].includes(state.phase)){state.running=false;finish();}else showCalibrationIntro();message('○ Window changed · new calibration required');});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(!$('#overlay').hidden)cancelTargets();if(state.running)pauseRecording('Browser tab hidden');}});
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{if(state.running)pauseRecording('Left observation studio');document.querySelectorAll('.view').forEach(v=>v.hidden=v.id!==b.dataset.view);document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));});
