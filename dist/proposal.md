@@ -30,10 +30,10 @@ No inputs are required to present the demo.
 For actual gaze testing, choose Connect camera, give camera permission, and look at the targets. Rehearsal precision is not evidence of webcam reliability.
 
 ## Privacy and interpretation
-Frames are processed in-browser; the application records no video and uploads no session data. WebGazer model assets may be fetched from third-party servers; network metadata is disclosed in those requests. Sessions remain in memory until cleared or the page closes. Exported files remain wherever the user saves them. Do not infer attention, emotion, diagnosis, comprehension, or learning outcomes from gaze. Adult, exploratory, nonclinical testing only in this initial scope.
+Frames are processed in-browser; the application records no video and uploads no session data. The face-tracking runtime and model assets are bundled on this site; no separate model provider is needed at runtime. Sessions remain in memory until cleared or the page closes. Exported files remain wherever the user saves them. Do not infer attention, emotion, diagnosis, comprehension, or learning outcomes from gaze. Adult, exploratory, nonclinical testing only in this initial scope.
 
 ## Technical handoff
-Static HTML/CSS/JavaScript, no app backend or paid API key. Run `python -m http.server 4173 --bind 127.0.0.1` inside `dist`, then visit http://127.0.0.1:4173. Camera access needs localhost or HTTPS and initial model downloads need internet. Vendored tracker: https://webgazer.cs.brown.edu/webgazer.js ; project and license: https://webgazer.cs.brown.edu/ . Keep the library's embedded notices.
+Static HTML/CSS/JavaScript, no app backend or paid API key. Run `python -m http.server 4173 --bind 127.0.0.1` inside `dist`, then visit http://127.0.0.1:4173. Camera access needs localhost or HTTPS and the app and local model assets need to finish loading. Vendored tracker: https://webgazer.cs.brown.edu/webgazer.js ; project and license: https://webgazer.cs.brown.edu/ . Keep the library's embedded notices.
 
 ## Acceptance checks for the adult pilot
 - Run real webcam validation on the agreed devices, including glasses and varied lighting.

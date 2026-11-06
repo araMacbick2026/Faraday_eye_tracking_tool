@@ -9,10 +9,60 @@ const fmt=n=>n==null?'—':Math.round(n)+' px';
 function phase(p,n){state.phase=p;document.querySelectorAll('.steps span').forEach((s,i)=>s.classList.toggle('selected',i===n-1));}
 function message(s){$('#signal').textContent=s;}
 function setDesk(html){$('#desk').innerHTML=html;}
-function setup(){phase('setup',1);setDesk(`<div class="welcome"><div class="eyebrow">EXPERIMENT NO. 001</div><h2>Where does a learner look?</h2><p>A short reading experiment, a simple webcam, and a transparent look at the quality of the signal.</p><label class="consent"><input id="consent" type="checkbox"><span>I agree to enable my camera for this exploratory demo. Frames are processed locally; nothing is recorded or uploaded by this app. Model downloads may contact external servers.</span></label><div class="actions"><button class="solid" id="camera" disabled>Connect camera ↗</button><button class="secondary" id="rehearse">Rehearse with pointer →</button></div><p class="small-note">ABOUT 3 MINUTES · DESKTOP RECOMMENDED · ADULT TESTING</p><div id="error" role="status"></div></div>`);$('#consent').onchange=e=>$('#camera').disabled=!e.target.checked;$('#camera').onclick=startCamera;$('#rehearse').onclick=()=>startMode('pointer');}
-function loadTracker(){return new Promise((resolve,reject)=>{if(window.webgazer)return resolve();let s=document.createElement('script');s.src='vendor/webgazer.js';s.onload=resolve;s.onerror=()=>reject(new Error('The tracking library could not be loaded.'));document.head.append(s);});}
-async function startCamera(){const epoch=++state.epoch;$('#camera').disabled=true;$('#camera').textContent='Connecting…';try{await loadTracker();if(epoch!==state.epoch)return;webgazer.saveDataAcrossSessions(false);webgazer.setRegression('ridge').setGazeListener(data=>{if(state.mode==='camera')state.latest=data?{x:data.x,y:data.y,t:performance.now()}:null;});await webgazer.begin();if(epoch!==state.epoch){webgazer.end();return;}webgazer.removeMouseEventListeners();webgazer.showPredictionPoints(false);webgazer.showVideoPreview(true);startMode('camera');}catch(e){if(window.webgazer)webgazer.end();$('#error').textContent='Camera could not start. Check browser camera permission and your connection for model downloads, then try again. You can also use pointer rehearsal.';$('#camera').disabled=false;$('#camera').textContent='Retry camera ↗';}}
-function startMode(mode){state.mode=mode;state.latest=null;$('#modeBadge').textContent=mode==='camera'?'LIVE WEBCAM':'POINTER REHEARSAL';$('#source').textContent=mode==='camera'?'Webcam estimate':'Pointer (not gaze)';message('○ Ready to calibrate');showCalibrationIntro();}
+function setup(){phase('setup',1);setDesk(`<div class="welcome"><div class="eyebrow">EXPERIMENT NO. 001</div><h2>Where does a learner look?</h2><p>A short reading experiment, a simple webcam, and a transparent look at the quality of the signal.</p><label class="consent"><input id="consent" type="checkbox"><span>I agree to enable my camera for this exploratory demo. Frames are processed locally; nothing is recorded or uploaded by this app. Tracking assets load from this site.</span></label><div class="actions"><button class="solid" id="camera" disabled>Connect camera ↗</button><button class="secondary" id="rehearse">Rehearse with pointer →</button></div><p class="small-note">ABOUT 3 MINUTES · DESKTOP RECOMMENDED · ADULT TESTING</p><div id="error" role="status"></div></div>`);$('#consent').onchange=e=>$('#camera').disabled=!e.target.checked;$('#camera').onclick=startCamera;$('#rehearse').onclick=()=>startMode('pointer');}
+let trackerPromise;
+function timeoutError(stage){const e=new Error(stage+' timed out');e.name='TimeoutError';return e;}
+function withTimeout(promise,ms,stage){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(timeoutError(stage)),ms);})]).finally(()=>clearTimeout(timer));}
+function stopCamera(){
+  const video=document.getElementById('webgazerVideoFeed');
+  if(video?.srcObject){video.srcObject.getTracks().forEach(track=>track.stop());video.srcObject=null;}
+  try{window.webgazer?.removeMouseEventListeners();window.webgazer?.end();}catch{/* A failed start may not have created the preview. */}
+  document.querySelectorAll('#webgazerVideoContainer,#webgazerGazeDot').forEach(el=>el.remove());
+}
+function cameraFailure(error,stage){
+  const name=error?.name||'Error';
+  if(name==='NotAllowedError'||name==='PermissionDeniedError'||name==='SecurityError')return 'Camera access was blocked. Open this link in Chrome or Edge in a separate browser window, allow camera access for this site, and check Windows Settings → Privacy & security → Camera if it is still blocked.';
+  if(name==='NotFoundError'||name==='DevicesNotFoundError')return 'No camera was found. Connect or enable your webcam, then reload and try again.';
+  if(name==='NotReadableError'||name==='TrackStartError')return 'The camera could not be opened. Close other apps using it (such as a video meeting), check the webcam privacy switch, then reload and try again.';
+  if(name==='OverconstrainedError')return 'This camera could not use the requested settings. Try another webcam or a desktop browser.';
+  if(name==='TimeoutError')return 'Startup took too long during '+stage+'. If no camera prompt appeared, open the site in Chrome or Edge outside this embedded browser. Otherwise check camera permission, then reload to retry.';
+  if(name==='UnsupportedError')return 'This browser does not expose camera access. Open the same link directly in Chrome or Edge on your computer.';
+  return 'Tracking could not initialize during '+stage+'. Reload to retry. If you are using an embedded browser, open this link directly in Chrome or Edge.';
+}
+function loadTracker(){
+  if(window.webgazer)return Promise.resolve();
+  if(trackerPromise)return trackerPromise;
+  trackerPromise=withTimeout(new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='vendor/webgazer.js';script.onload=resolve;script.onerror=()=>reject(new Error('Tracking library download failed'));document.head.append(script);}),20000,'tracking library').catch(error=>{trackerPromise=null;throw error;});
+  return trackerPromise;
+}
+async function startCamera(){
+  const epoch=++state.epoch;let stage='browser camera support';
+  const button=$('#camera');button.disabled=true;button.textContent='Checking camera…';$('#rehearse').disabled=true;$('#error').textContent='';
+  try{
+    if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia){const error=new Error('Camera API unavailable');error.name='UnsupportedError';throw error;}
+    const policy=document.permissionsPolicy||document.featurePolicy;
+    if(policy?.allowsFeature&&!policy.allowsFeature('camera')){const error=new Error('Camera blocked by browser embedding policy');error.name='SecurityError';throw error;}
+    stage='tracking library loading';await loadTracker();if(epoch!==state.epoch)return;
+    // This WebGazer distribution uses a relative MediaPipe directory by default.
+    // Ship the matching assets with the application and resolve from the page URL.
+    webgazer.params.faceMeshSolutionPath=new URL('mediapipe/face_mesh/',document.baseURI).href;
+    webgazer.saveDataAcrossSessions(false);await webgazer.setCameraConstraints({audio:false,video:{width:{ideal:640},height:{ideal:480},facingMode:'user'}});
+    webgazer.setRegression('ridge').setGazeListener(data=>{if(state.mode==='camera')state.latest=data?{x:data.x,y:data.y,t:performance.now()}:null;});
+    stage='camera permission and face-tracking initialization';button.textContent='Allow camera to continue…';$('#error').textContent='Allow camera access when prompted. Initializing the local tracking model can take a few seconds.';
+    const startup=Promise.resolve(webgazer.begin());
+    startup.then(()=>{if(epoch!==state.epoch)stopCamera();},()=>{});
+    await withTimeout(startup,45000,stage);
+    if(epoch!==state.epoch){stopCamera();return;}
+    webgazer.removeMouseEventListeners();webgazer.showPredictionPoints(false);webgazer.showVideoPreview(true);startMode('camera');
+  }catch(error){
+    if(epoch!==state.epoch)return;
+    state.epoch++;stopCamera();
+    console.warn('Faraday camera startup:',stage,error?.name,error?.message);
+    $('#error').textContent=cameraFailure(error,stage)+' You can still rehearse the workflow with the pointer.';
+    button.disabled=false;button.textContent='Reload & retry camera ↗';button.onclick=()=>location.reload();$('#rehearse').disabled=false;
+  }
+}
+function startMode(mode){if(mode==='pointer')stopCamera();state.mode=mode;state.latest=null;$('#modeBadge').textContent=mode==='camera'?'LIVE WEBCAM':'POINTER REHEARSAL';$('#source').textContent=mode==='camera'?'Webcam estimate':'Pointer (not gaze)';message('○ Ready to calibrate');showCalibrationIntro();}
 document.addEventListener('pointermove',e=>{if(state.mode==='pointer')state.latest={x:e.clientX,y:e.clientY,t:performance.now()};});
 function showCalibrationIntro(){phase('calibration',2);setDesk(`<div class="welcome"><div class="eyebrow">01 / FIND YOUR BEARINGS</div><h2>Nine points. One steady position.</h2><p>${state.mode==='camera'?'Look directly at each orange target and click it five times. Keep your eyes on the target as you click.':'This is pointer rehearsal, not eye tracking. Move to each target and click five times to practise the workflow.'}</p><p>The targets fill the browser window. Stay in the same position and keep this window size throughout the experiment.</p><div class="actions"><button class="solid" id="calibrate">Begin calibration →</button><button class="secondary" id="reset">Start over</button></div></div>`);$('#calibrate').onclick=beginCalibration;$('#reset').onclick=reset;}
 function placeTarget(pt){$('#target').style.left=pt[0]*innerWidth+'px';$('#target').style.top=pt[1]*innerHeight+'px';}
@@ -37,9 +87,9 @@ function drawHeatmap(){const c=$('#heatmap'),r=state.activityRect;c.width=r.widt
 function download(type){const report={schema:'faraday.observatory.v1',exportedAt:new Date().toISOString(),mode:state.mode,nonclinical:true,quality:state.mode==='pointer'?'rehearsal-not-gaze':state.validation?.pass?'provisional-pass':'low-quality',duration_ms:Math.round(state.elapsed),sampleIntervalTarget_ms:50,viewport:state.viewport,activityRect:state.activityRect,regions:state.regions,validation:state.validation,samples:state.samples,limitations:'Webcam estimates; not attention, comprehension, or clinical measurements. Pixel accuracy, not visual degrees. Missing samples retained. No video.'};const content=type==='json'?JSON.stringify(report,null,2):'mode,quality,t_ms,x,y,valid,offscreen,region\n'+state.samples.map(s=>[state.mode,report.quality,s.t_ms,s.x??'',s.y??'',s.valid,s.offscreen,s.region].join(',')).join('\n');const url=URL.createObjectURL(new Blob([content],{type:type==='json'?'application/json':'text/csv'}));const a=document.createElement('a');a.href=url;a.download=`faraday-${state.mode}-${Date.now()}.${type}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function cancelTargets(){clearTimeout(targetTimer);activeValidation=null;$('#overlay').hidden=true;if(state.phase==='calibration')showCalibrationIntro();else showValidationIntro();}
 $('#cancelTarget').onclick=cancelTargets;
-function reset(){state.epoch++;clearTimeout(targetTimer);activeValidation=null;state.running=false;if(window.webgazer){webgazer.clearData();webgazer.end();}Object.assign(state,{mode:null,phase:'setup',latest:null,calibrated:false,validation:null,samples:[],elapsed:0});$('#overlay').hidden=true;$('#gazeDot').hidden=true;$('#modeBadge').textContent='NO SESSION';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';message('○ Session cleared · camera disconnected');setup();}
+function reset(){state.epoch++;clearTimeout(targetTimer);activeValidation=null;state.running=false;if(window.webgazer)webgazer.clearData();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',latest:null,calibrated:false,validation:null,samples:[],elapsed:0});$('#overlay').hidden=true;$('#gazeDot').hidden=true;$('#modeBadge').textContent='NO SESSION';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';message('○ Session cleared · camera disconnected');setup();}
 window.addEventListener('resize',()=>{if(!state.mode)return;state.calibrated=false;state.validation=null;state.running=false;clearTimeout(targetTimer);activeValidation=null;$('#overlay').hidden=true;$('#accuracy').textContent='Invalidated';$('#calStatus').textContent='Window changed';showCalibrationIntro();message('○ Window changed · recalibrate');});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(!$('#overlay').hidden)cancelTargets();if(state.running)togglePause();}});
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{if(state.running)togglePause();document.querySelectorAll('.view').forEach(v=>v.hidden=v.id!==b.dataset.view);document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));});
-window.addEventListener('beforeunload',()=>{if(window.webgazer)webgazer.end();});
+window.addEventListener('beforeunload',stopCamera);
 setup();state.raf=requestAnimationFrame(tick);
