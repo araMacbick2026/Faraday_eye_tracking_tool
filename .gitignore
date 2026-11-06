@@ -2,3 +2,7 @@ outputs/
 node_modules/
 camera-recovery.png
 reliability-tail.js
+.railway/
+.env
+.env.*
+!.env.example

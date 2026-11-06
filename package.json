@@ -1,0 +1,11 @@
+{
+  "name": "faraday-learning-observatory",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node camera.test.mjs && node --test server.test.mjs"
+  }
+}
