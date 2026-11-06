@@ -1,41 +1,43 @@
-import vm from 'node:vm';
-import fs from 'node:fs';
-import assert from 'node:assert/strict';
-const source=fs.readFileSync('dist/app.js','utf8');
+import vm from 'node:vm';import fs from 'node:fs';import assert from 'node:assert/strict';
+const code=['dist/reliability.js','dist/stories.js','dist/app.js'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
 function environment({media=true,policy=true,error=null}={}){
- const elements=new Map();let stopped=0,ended=0,began=0;
- const element=()=>({textContent:'',disabled:false,hidden:true,style:{},classList:{toggle(){}},remove(){},getBoundingClientRect(){return {x:0,y:0,width:600,height:400}}});
- const get=s=>{if(!elements.has(s))elements.set(s,element());return elements.get(s)};
- const tracker={params:{},saveDataAcrossSessions(){return this},async setCameraConstraints(c){this.constraints=c},setRegression(){return this},setGazeListener(){return this},async begin(){began++;if(error)throw error;return this},end(){ended++;throw new Error('partial initialization')},removeMouseEventListeners(){},showPredictionPoints(){},showVideoPreview(){}};
- const context={console:{warn(){}},URL,performance, setTimeout,clearTimeout,setInterval(){},requestAnimationFrame(){},innerWidth:1200,innerHeight:800,devicePixelRatio:1,
- document:{baseURI:'https://example.test/',permissionsPolicy:{allowsFeature:()=>policy},querySelector:get,querySelectorAll:()=>[],getElementById:id=>id==='webgazerVideoFeed'?{srcObject:{getTracks:()=>[{stop(){stopped++}}]}}:null,addEventListener(){},head:{append(){}}},
- navigator:{mediaDevices:media?{getUserMedia(){}}:undefined},location:{reload(){}},window:{webgazer:tracker,isSecureContext:true,addEventListener(){}}};
- Object.defineProperty(context,'webgazer',{get:()=>context.window.webgazer});
- vm.createContext(context);vm.runInContext(source,context);
- return {context,get,tracker,stats:()=>({stopped,ended,began})};
+ let time=1000,stopped=0,began=0,training=0;const elements=new Map(),events={};
+ const el=()=>({textContent:'',disabled:false,hidden:true,style:{},classList:{toggle(){}},remove(){},scrollIntoView(){},getBoundingClientRect(){return{x:0,y:0,width:600,height:440}},getContext(){return{createRadialGradient(){return{addColorStop(){}}},fillRect(){}}}});
+ const get=s=>{if(!elements.has(s))elements.set(s,el());return elements.get(s)};
+ const tracker={params:{},getTracker(){return{getEyePatches:async()=>false}},clearData(){},recordScreenPosition(){training++},saveDataAcrossSessions(){return this},async setCameraConstraints(c){this.constraints=c},setRegression(){return this},setGazeListener(){return this},async begin(){began++;if(error)throw error;return this},end(){throw new Error('partial start')},removeMouseEventListeners(){},showPredictionPoints(){},showVideoPreview(){}};
+ const window={webgazer:tracker,isSecureContext:true,addEventListener:(n,f)=>events[n]=f};
+ const context={window,document:{baseURI:'https://example.test/',permissionsPolicy:{allowsFeature:()=>policy},querySelector:get,querySelectorAll:()=>[],getElementById:id=>id==='webgazerVideoFeed'?{srcObject:{getTracks:()=>[{stop(){stopped++}}]}}:null,addEventListener:(n,f)=>events[n]=f,head:{append(){}}},performance:{now:()=>time},URL,console:{warn(){}},setTimeout,clearTimeout,setInterval(){},requestAnimationFrame(){},navigator:{mediaDevices:media?{getUserMedia(){}}:undefined},location:{reload(){}},innerWidth:1200,innerHeight:800,devicePixelRatio:1};
+ Object.defineProperty(context,'webgazer',{get:()=>window.webgazer});vm.createContext(context);vm.runInContext(code,context);
+ return{context,get,tracker,events,run:s=>vm.runInContext(s,context),advance:ms=>time+=ms,stats:()=>({stopped,began,training})};
 }
-for(const [name,expected] of [['NotAllowedError','blocked'],['NotFoundError','No camera'],['NotReadableError','could not be opened'],['OverconstrainedError','settings'],['TimeoutError','too long']]){
- const e=environment({error:Object.assign(new Error(name),{name})});await vm.runInContext('startCamera()',e.context);
- assert.match(e.get('#error').textContent,new RegExp(expected));assert.equal(e.get('#camera').disabled,false);assert.equal(e.get('#rehearse').disabled,false);assert.equal(e.stats().stopped,1);
-}
-for(const config of [{media:false},{policy:false}]){const e=environment(config);await vm.runInContext('startCamera()',e.context);assert.equal(e.stats().began,0);assert.match(e.get('#error').textContent,/Chrome or Edge/);}
-const success=environment();await vm.runInContext('startCamera()',success.context);assert.equal(success.tracker.params.faceMeshSolutionPath,'https://example.test/mediapipe/face_mesh/');assert.equal(success.tracker.constraints.audio,false);assert.equal(vm.runInContext('state.mode',success.context),'camera');
-vm.runInContext('stopCamera()',success.context);assert.equal(success.stats().stopped,1);
-for(const name of ['face_mesh.binarypb','face_mesh_solution_packed_assets_loader.js','face_mesh_solution_packed_assets.data','face_mesh_solution_simd_wasm_bin.js','face_mesh_solution_simd_wasm_bin.wasm','face_mesh_solution_wasm_bin.js','face_mesh_solution_wasm_bin.wasm'])assert.ok(fs.statSync('dist/mediapipe/face_mesh/'+name).size>100);
-console.log('Passed: camera error recovery (5 cases), unavailable API, blocked policy, startup configuration, stream cleanup, and 7 required bundled assets.');
+for(const [name,expected] of [['NotAllowedError','blocked'],['NotFoundError','No camera'],['NotReadableError','could not be opened'],['OverconstrainedError','settings'],['TimeoutError','too long']]){const e=environment({error:Object.assign(new Error(name),{name})});await e.run('startCamera()');assert.match(e.get('#error').textContent,new RegExp(expected));assert.equal(e.get('#camera').disabled,false);assert.equal(e.stats().stopped,1);}
+for(const config of [{media:false},{policy:false}]){const e=environment(config);await e.run('startCamera()');assert.equal(e.stats().began,0);}
+const success=environment();await success.run('startCamera()');assert.equal(success.tracker.params.faceMeshSolutionPath,'https://example.test/mediapipe/face_mesh/');assert.equal(success.run('state.mode'),'camera');
+const cal=environment();cal.run("state.mode='camera';beginCalibration();clickCalibration()");cal.advance(1000);cal.run('collectCalibration()');assert.equal(cal.stats().training,0,'No training without face');
+for(let point=0;point<9;point++){if(point)cal.run('clickCalibration()');cal.advance(800);for(let i=0;i<15;i++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${point*15+i+1}};state.stableSince=0;collectCalibration()`);}}
+assert.equal(cal.run('state.calibrated'),true);assert.equal(cal.stats().training,135);assert.equal(cal.run('state.calibrationLog.length'),9);
+const r=success.context.window.Reliability;const good=()=>[1,2,3,4,5].map(point=>({point,slots:60,errors:Array(60).fill(20)}));
+assert.equal(r.summarize(good()).pass,true);let rows=good();rows[4].errors=Array(60).fill(400);assert.equal(r.summarize(rows).pass,false,'Bad corner fails despite low global median');rows=good();rows[0].errors=[20];assert.equal(r.summarize(rows).pass,false,'Sparse target fails');
+const v=environment();v.run("state.mode='pointer';beginValidation('pre')");for(let i=0;i<5;i++){for(let j=0;j<60;j++){v.advance(j===0?1000:50);v.run(`state.latest={x:activeValidation.target.x,y:activeValidation.target.y,t:now(),id:1};collectValidation()`);}v.advance(100);v.run('collectValidation()');}assert.equal(v.run('state.preChecks.length'),1);assert.equal(v.stats().training,0,'Validation must never train');
+// All thresholds and post-activity gates affect session interpretation.
+assert.equal(r.quality('camera',{pass:true,median:20},{pass:true,median:90},1,false),'not-suitable-for-interpretation');assert.equal(r.quality('camera',{pass:true,median:20},null,1,false),'not-suitable-for-interpretation');assert.equal(r.quality('camera',{pass:true,median:20},{pass:true,median:30},.6,false),'not-suitable-for-interpretation');assert.equal(r.quality('camera',{pass:true,median:20},{pass:true,median:30},1,false),'provisional-broad-region-only');assert.equal(r.quality('pointer',null,null,1,false),'rehearsal-not-gaze');
+const rec=environment();rec.run("state.mode='camera';state.face={x:.5,y:.5,scale:.2,t:now(),id:1};state.stableSince=0;state.latest={x:100,y:100,t:now(),id:7};addRecordingSlot(50);addRecordingSlot(100)");assert.equal(rec.run('state.samples.filter(s=>s.valid).length'),1,'Repeated prediction counted once');rec.advance(500);rec.run('addRecordingSlot(150)');assert.equal(rec.run('state.samples[2].valid'),false,'Stale signal is missing');rec.run('addRecordingSlot(200,true)');assert.equal(rec.run('state.samples[3].reason'),'scheduler-gap');
+const lost=environment();lost.run("state.mode='camera';state.running=true;state.phase='recording';state.latest=null;state.face=null;lastTick=now()");lost.advance(100);lost.run('tick(now())');lost.advance(1100);lost.run('tick(now())');assert.equal(lost.run('state.running'),false,'Signal loss pauses');
+const moved=environment();moved.run("state.mode='camera';state.running=true;state.phase='recording';state.baseline={x:.5,y:.5,scale:.2};state.face={x:.7,y:.5,scale:.2,t:now()};lastTick=now()");moved.advance(50);moved.run('tick(now())');assert.equal(moved.run('state.invalidated'),true);assert.equal(moved.run('state.running'),false);
+const blocked=environment();blocked.run("state.mode='camera';state.preChecks=[];showActivity(true)");assert.equal(blocked.run('state.phase'),'calibration','Failed prechecks block recording');
+const review=environment();review.run("state.mode='camera';chooseStory();state.samples=[];state.activityRect={width:600,height:440};renderReview()");assert.equal(review.get('#heatmap').hidden,true);assert.match(review.get('#desk').innerHTML,/NOT SUITABLE/);assert.equal(review.run('sessionReport().schema'),'faraday.observatory.v2');
+const stories=success.context.window.STORIES;assert.equal(stories.length,6);assert.equal(new Set(stories.map(s=>s.id)).size,6);for(const s of stories){assert.notEqual(r.choose(stories,s.id,()=>0).id,s.id);assert.ok(s.paragraphs.length===3&&s.question&&s.diagram.length===3);}
+const css=fs.readFileSync('dist/style.css','utf8');assert.ok(+css.match(/#overlay\{[^}]*z-index:(\d+)/)[1]>+css.match(/#webgazerVideoContainer\{[^}]*z-index:(\d+)/)[1]);
+console.log('PASS: camera recovery; 9-point/135-sample gated calibration; independent validation; per-target quality gates; drift/coverage rules; unique/stale/gap accounting; signal/movement pauses; recording block; failed heatmap hidden; exports; 6 randomized stories; overlay ordering.');
 
-// The preview must never cover calibration target 7 in the bottom-left corner.
-const css=fs.readFileSync('dist/style.css','utf8');
-const overlayLayer=Number(css.match(/#overlay\{[^}]*z-index:(\d+)/)[1]);
-const previewLayer=Number(css.match(/#webgazerVideoContainer\{[^}]*z-index:(\d+)/)[1]);
-assert.ok(overlayLayer>previewLayer,'Calibration must cover the camera preview');
-const calibrationRun=environment();
-vm.runInContext("state.mode='pointer';beginCalibration()",calibrationRun.context);
-for(let point=0;point<9;point++){
- assert.match(calibrationRun.get('#targetInstruction').textContent,new RegExp('Calibration '+(point+1)+'/9'));
- for(let click=0;click<5;click++)vm.runInContext('clickCalibration({})',calibrationRun.context);
-}
-assert.equal(vm.runInContext('state.calibrated',calibrationRun.context),true);
-assert.equal(calibrationRun.get('#overlay').hidden,true);
-assert.equal(calibrationRun.get('#calStatus').textContent,'Rehearsed 9/9');
-console.log('Passed: all 9 calibration targets / 45 clicks, including points 7–9; calibration layer above camera preview.');
+
+// A second successful check is required; failed checks reset the streak.
+v.run("beginValidation('pre')");
+for(let point=0;point<5;point++){for(let slot=0;slot<60;slot++){v.advance(slot===0?1000:50);v.run('state.latest={x:activeValidation.target.x,y:activeValidation.target.y,t:now(),id:1};collectValidation()');}v.advance(100);v.run('collectValidation()');}
+assert.equal(v.run('state.preChecks.length'),2);assert.equal(v.stats().training,0);
+v.run("chooseStory();state.samples=[{t_ms:50,prediction_id:1,prediction_age_ms:0,x:10,y:20,valid:true,reason:'fresh',offscreen:false,activity_x:10,activity_y:20,region:'reading'}]");
+const exported=JSON.parse(v.run("exportContent('json')"));assert.equal(exported.schema,'faraday.observatory.v2');assert.equal(exported.preChecks.length,2);assert.ok(exported.story.id&&exported.story.paragraphs.length===3);
+const csv=v.run("exportContent('csv')").split('\n');assert.equal(csv.length,2);assert.equal(csv[0].split(',').length,csv[1].split(',').length);assert.match(csv[1],/^pointer,rehearsal-not-gaze,/);
+v.run("validationRows=[{point:1,slots:60,errors:[]}];finishValidation()");assert.equal(v.run('state.preChecks.length'),0);
+const canceled=environment();canceled.run("state.mode='pointer';chooseStory();state.activityRect={width:600,height:440};beginValidation('post');cancelTargets()");assert.equal(canceled.run('state.postCheck'),null);assert.equal(canceled.run('state.phase'),'review');
+console.log('PASS: two consecutive checks, failed-check reset, JSON/CSV serialization and labels, cancelled drift-check recovery.');

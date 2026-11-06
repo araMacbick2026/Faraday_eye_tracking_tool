@@ -1,14 +1,15 @@
-# Verification record — 6 November 2026
+# Verification — Faraday v0.2
 
-Passed JavaScript syntax validation. In the browser, checked initial layout and disabled camera button before consent, pointer rehearsal entry, all 45 calibration clicks across nine targets, independent five-target validation, accuracy results, learning activity start, pause, finish/review, JSON export and clear/reset. Downloaded JSON was parsed and confirmed to contain schema faraday.observatory.v1, pointer mode, rehearsal-not-gaze quality, 3820 ms and 69 raw samples.
+Automated regression checks (`node camera.test.mjs`) passed:
+- Camera startup error handling for permission denial, missing/busy device, constraints and timeout; unavailable API and blocked embedding policy; successful configuration and safe cleanup.
+- Nine calibration targets with 135 spaced accepted samples; no training without a visible stable face; calibration layer above webcam preview.
+- Validation never trains the model; per-target median/p90/coverage/minimum-count gates; two consecutive successful pre-checks; failed check resets streak.
+- Unique callback accounting, stale estimates and scheduler gaps; signal-loss pause and movement invalidation; camera recording blocked without passing checks.
+- Post-check drift, skipped/cancelled check, low recording coverage and failed-session heatmap restrictions.
+- Six original stories with no immediate random repeat; JSON/CSV serialization includes story and quality labels.
 
-Final code also removes the untrained-prediction gate from calibration (training must be allowed before a prediction exists) and records activity-relative coordinates to keep heatmap placement consistent when the page moves. Final source passed JavaScript syntax validation. These two final fixes were inspected in code; a complete second browser run was not performed.
+Browser walkthrough (pointer rehearsal) passed: startup layout and consent, all nine hold-to-collect targets, 135 calibration samples, five-target pre-check results and failed gate, rehearsal-only preview, story randomization, recording locks shuffle, pause, finish, post-story five-target check, before/after results, heatmap review and JSON download. No JavaScript warnings/errors were observed in the local walkthrough. The downloaded JSON was parsed: 137 recording slots with 137 unique prediction IDs, correct clock story and complete text, all 135 calibration samples, validation history including post-check, and one manual pause.
 
-Private hosting deployment succeeded for commit 01031b9f5e988d3ce1cf212ca095db68779e496f. Hosted access gate was verified. The hosted application requires the owner's ChatGPT sign-in. It is not publicly shared with Bevin.
+CSV content/column alignment and labelling passed automated checks. A CSV download was clicked in the browser, but a second downloaded file was not found; the complete browser-to-file CSV download remains unverified. JSON download-event notification timed out in the automation tool even though the JSON file was saved and parsed successfully.
 
-Not verified: real webcam accuracy, model download success in the user's browser, cross-browser/device performance, and CSV download end-to-end. Do not present pointer results as camera reliability evidence.
-
-## Camera startup repair — 6 November 2026
-The initial WebGazer download configured faceMeshSolutionPath as ./mediapipe/face_mesh, but that directory was absent. Bundled the corresponding official Brown-hosted MediaPipe JS, model data, graph and SIMD/non-SIMD WASM assets. The app now resolves that path explicitly, checks camera API/embedding policy, uses flexible video constraints, reports permission/device/model initialization failures, bounds startup time, and safely stops tracks during teardown. Retry after failure reloads to avoid partially initialized tracker state.
-
-Validation: node camera.test.mjs passed five error categories, unavailable API, blocked embedding policy, successful configuration, camera track cleanup, and required-asset presence. node --check dist/app.js passed. Both WASM files have valid binary signatures. Private deployment succeeded for commit 2dfbdd8e63000156fc43029ffa179004483ff013. Browser verified updated consent wording and the startup progress message. Actual camera availability and gaze reliability depend on the browser/OS and still require a human session.
+Functional testing is not human accuracy validation. No new real webcam session, participant pilot, cross-device, glasses or lighting study was performed. Thresholds and movement proxy remain engineering heuristics. Do not claim improved numerical accuracy until measured in repeated human sessions.
