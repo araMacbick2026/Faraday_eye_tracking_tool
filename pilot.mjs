@@ -4,7 +4,8 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 
 const athlete = { id: 'pilot-athlete', name: 'Alex Morgan', team: 'Faraday Hockey Pilot', position: 'Forward', season: '2026–27' };
 const roles = ['coach', 'athlete', 'parent'];
-const weekMs = 7 * 86400000;
+const dayMs = 86400000;
+const weekMs = 7 * dayMs;
 const sample = [
   { type: 'skill', date: '2026-11-02', attempts: 10, successful: 5, note: 'Baseline for the same passing drill.' },
   { type: 'skill', date: '2026-11-09', attempts: 10, successful: 7, note: 'Look up before passing.' },
@@ -20,10 +21,25 @@ const demoWeeklyUpdates = [
   { type: 'nutrition', date: '2026-11-02', outcome: 'no' },
   { type: 'nutrition', date: '2026-11-03', outcome: 'yes' },
   { type: 'followup', date: '2026-11-10', outcome: 'independent', note: 'Found an open teammate in a new drill without a reminder.' },
-  { type: 'nutrition', date: '2026-11-10', outcome: 'yes' }
+  { type: 'nutrition', date: '2026-11-10', outcome: 'yes', meals: 'regular' },
+  { type: 'nutrition', date: '2026-11-11', outcome: 'yes', meals: 'regular' },
+  { type: 'nutrition', date: '2026-11-12', outcome: 'no', meals: 'missed' },
+  { type: 'nutrition', date: '2026-11-13', outcome: 'yes', meals: 'regular' },
+  { type: 'goal', date: '2026-11-09', note: 'Look up before passing in the next two practices.', status: 'working' },
+  ...[
+    ['2026-10-19', '2026-10-22', 79, 29, 4],
+    ['2026-10-26', '2026-10-29', 82, 34, 5],
+    ['2026-11-02', '2026-11-05', 85, 38, 5],
+    ['2026-11-09', '2026-11-12', 88, 41, 5]
+  ].flatMap(([monday, thursday, grade, successful, schoolPresent]) => [
+    { type: 'school', date: thursday, source: 'Sample school report', grade, schoolPresent, schoolScheduled: 5 },
+    { type: 'training', date: monday, name: 'Passing and puck movement', attendance: 'present',
+      attempts: 50, successful, note: 'Practised looking up before receiving the puck.' },
+    { type: 'training', date: thursday, name: 'Team practice', attendance: schoolPresent === 4 ? 'absent' : 'present' }
+  ])
 ].map(record => ({
   ...record, athleteId: athlete.id,
-  enteredBy: ['reflection', 'nutrition'].includes(record.type) ? 'athlete' : 'coach'
+  enteredBy: ['reflection', 'nutrition', 'goal'].includes(record.type) ? 'athlete' : 'coach'
 }));
 
 const demoTests = {
@@ -46,8 +62,8 @@ const demoMeasurements = Object.entries(demoTests).flatMap(([metricId, values]) 
     date: demoDates[demoDates.length - values.length + i], source: 'Fictional sample', enteredBy: 'coach'
   })));
 const writers = {
-  coach: ['measurement', 'skill', 'followup', 'school'],
-  athlete: ['reflection', 'nutrition'],
+  coach: ['measurement', 'skill', 'training', 'followup', 'school'],
+  athlete: ['reflection', 'nutrition', 'goal'],
   parent: []
 };
 const outcomes = ['independent', 'prompted', 'not yet'];
@@ -78,6 +94,42 @@ function dateValue(value) {
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value ? time : NaN;
 }
 
+const dateKey = time => new Date(time).toISOString().slice(0, 10);
+const recordKey = record => [record.type, record.date, record.type === 'training' ? record.name.toLowerCase() : ''].join('/');
+const latestRecord = (records, match) => records.filter(match).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+const countPair = (total, count, max) =>
+  Number.isInteger(total) && total >= 1 && total <= max && Number.isInteger(count) && count >= 0 && count <= total;
+
+function summarizeWeek(records, start) {
+  const weekStart = dateKey(start);
+  const weekEnd = dateKey(start + weekMs - dayMs);
+  const weekly = records.filter(record => record.date >= weekStart && record.date <= weekEnd);
+  const grade = latestRecord(weekly, record => record.type === 'school' && Number.isFinite(record.grade));
+  const schoolAttendance = latestRecord(weekly, record => record.type === 'school' && record.schoolScheduled);
+  const training = weekly.filter(record => record.type === 'training' && record.attendance !== 'cancelled');
+  const passing = training.filter(record => record.attendance === 'present' && record.attempts);
+  const results = passing.length ? passing : weekly.filter(record => record.type === 'skill');
+  const nutrition = weekly.filter(record => record.type === 'nutrition');
+  return {
+    weekStart,
+    grade: grade ? { value: grade.grade, source: grade.source, date: grade.date } : null,
+    schoolAttendance: schoolAttendance ? { present: schoolAttendance.schoolPresent, scheduled: schoolAttendance.schoolScheduled,
+      source: schoolAttendance.source, date: schoolAttendance.date } : null,
+    sports: results.length ? {
+      attempts: results.reduce((total, record) => total + record.attempts, 0),
+      successful: results.reduce((total, record) => total + record.successful, 0),
+      basis: passing.length ? 'Training sessions' : 'Passing drill entries'
+    } : null,
+    training: training.length ? { present: training.filter(record => record.attendance === 'present').length, scheduled: training.length } : null,
+    nutrition: {
+      days: new Set(nutrition.map(record => record.date)).size,
+      hydrated: nutrition.filter(record => record.outcome === 'yes').length,
+      mealDays: nutrition.filter(record => record.meals).length,
+      regularMeals: nutrition.filter(record => record.meals === 'regular').length
+    }
+  };
+}
+
 function validate(body) {
   const { type, date } = body;
   if (!Number.isFinite(dateValue(date))) throw new Error('Enter a valid date.');
@@ -95,10 +147,22 @@ function validate(body) {
     }
     return { ...record, metricId: metric.id, value, source: 'Coach entry' };
   }
+  if (type === 'training') {
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (!name || name.length > 80) throw new Error('Enter a session name up to 80 characters.');
+    const { attendance, attempts, successful } = body;
+    if (!['present', 'absent', 'cancelled'].includes(attendance)) throw new Error('Choose an attendance status.');
+    if (attempts !== undefined || successful !== undefined) {
+      if (attendance !== 'present' || !countPair(attempts, successful, 1000)) {
+        throw new Error('For an attended session, enter 1–1,000 passing attempts and a successful pass count within that range.');
+      }
+      return { ...record, name, attendance, attempts, successful };
+    }
+    return { ...record, name, attendance };
+  }
   if (type === 'skill') {
     const { attempts, successful } = body;
-    if (!Number.isInteger(attempts) || attempts < 1 || attempts > 100 ||
-        !Number.isInteger(successful) || successful < 0 || successful > attempts) {
+    if (!countPair(attempts, successful, 100)) {
       throw new Error('Enter 1–100 attempts and a success count within that range.');
     }
     return { ...record, attempts, successful };
@@ -106,13 +170,26 @@ function validate(body) {
   if (type === 'followup' || type === 'nutrition') {
     const allowed = type === 'followup' ? outcomes : ['yes', 'no'];
     if (!allowed.includes(body.outcome)) throw new Error('Choose a result.');
+    if (type === 'nutrition' && body.meals !== undefined) {
+      if (!['regular', 'missed'].includes(body.meals)) throw new Error('Choose a meal check-in response.');
+      return { ...record, outcome: body.outcome, meals: body.meals };
+    }
     return { ...record, outcome: body.outcome };
   }
-  if (!note) throw new Error('Enter an update.');
   if (type === 'school') {
     const source = typeof body.source === 'string' ? body.source.trim() : '';
     if (!source || source.length > 80) throw new Error('Enter the source of the school update.');
-    return { ...record, source };
+    const { grade, schoolPresent, schoolScheduled } = body;
+    if (grade !== undefined && (!Number.isFinite(grade) || grade < 0 || grade > 100)) throw new Error('Enter a grade from 0 to 100.');
+    const hasAttendance = schoolPresent !== undefined || schoolScheduled !== undefined;
+    if (hasAttendance && !countPair(schoolScheduled, schoolPresent, 7)) throw new Error('Enter 1–7 school days and the number attended.');
+    if (grade === undefined && !hasAttendance && !note) throw new Error('Enter a grade, attendance, or a school note.');
+    return { ...record, source, grade, schoolPresent, schoolScheduled };
+  }
+  if (!note) throw new Error('Enter an update.');
+  if (type === 'goal') {
+    if (!['working', 'achieved'].includes(body.status)) throw new Error('Choose a goal status.');
+    return { ...record, status: body.status };
   }
   return record;
 }
@@ -144,8 +221,8 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
   const shareNutrition = env.PILOT_SHARE_NUTRITION === 'true';
   let records = enabled && dataFile && existsSync(dataFile) ? JSON.parse(readFileSync(dataFile, 'utf8')) : structuredClone(sample);
   if (demoData) {
-    const recordedDays = new Set(records.map(record => record.type + '/' + record.date));
-    records = [...records, ...demoWeeklyUpdates.filter(record => !recordedDays.has(record.type + '/' + record.date))];
+    const recordedDays = new Set(records.map(recordKey));
+    records = [...records, ...demoWeeklyUpdates.filter(record => !recordedDays.has(recordKey(record)))];
     if (!records.some(record => record.type === 'measurement')) records.push(...demoMeasurements);
   }
   const sessions = new Map();
@@ -227,24 +304,38 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       const visible = workspace.records.filter(record => {
         if (record.type === 'nutrition') return role === 'athlete' || (role === 'parent' && shareNutrition);
         if (record.type === 'reflection') return role !== 'parent';
+        if (record.type === 'goal') return role === 'athlete';
         return true;
       });
       const latest = visible.map(record => record.date).sort().at(-1);
       const date = url.searchParams.get('date') || latest;
       const time = dateValue(date);
       if (!Number.isFinite(time)) { json(res, 400, { error: 'Enter a valid week date.' }); return true; }
-      const start = time - ((new Date(time).getUTCDay() + 6) % 7) * 86400000;
+      const start = time - ((new Date(time).getUTCDay() + 6) % 7) * dayMs;
       const end = start + weekMs;
       const history = visible.filter(record => record.type === 'skill' && dateValue(record.date) < end)
         .sort((a, b) => a.date.localeCompare(b.date));
-      const weekly = visible.filter(record => dateValue(record.date) >= start && dateValue(record.date) < end);
+      const weekly = visible.filter(record => dateValue(record.date) >= start && dateValue(record.date) < end).map(record => {
+        if (role === 'parent' && record.type === 'nutrition') return { type: record.type, date: record.date };
+        if (role !== 'coach' && record.type === 'training') {
+          const { note, ...session } = record;
+          return session;
+        }
+        return record;
+      });
+      const weekSummary = summarizeWeek(visible, start);
+      if (role !== 'athlete') weekSummary.nutrition = role === 'parent' && shareNutrition ? { days: weekSummary.nutrition.days } : null;
+      const trends = role === 'parent' ? [-3, -2, -1, 0].map(offset => {
+        const { weekStart, grade, sports } = summarizeWeek(visible, start + offset * weekMs);
+        return { weekStart, grade, sports };
+      }) : undefined;
+      const goal = role === 'athlete' ? latestRecord(visible, record => record.type === 'goal' && dateValue(record.date) < end) : undefined;
       const measurements = visible.filter(record => record.type === 'measurement' && dateValue(record.date) < end)
         .sort((a, b) => a.date.localeCompare(b.date));
-      json(res, 200, { role, athlete, shareNutrition, date, history, weekly, measurements,
+      json(res, 200, { role, athlete, shareNutrition, date, history, weekly, measurements, weekSummary, trends, goal, demo: demoData,
         ...(role !== 'parent' ? { observation: workspace.observation } : {}),
         reference: demoData ? demoReference : null,
-        weekStart: new Date(start).toISOString().slice(0, 10),
-        weekEnd: new Date(end - 86400000).toISOString().slice(0, 10) });
+        weekStart: dateKey(start), weekEnd: dateKey(end - dayMs) });
     } else if (pathname === '/pilot/api/observations' && req.method === 'POST') {
       if (role === 'parent') { json(res, 403, { error: 'This role cannot save an observation.' }); return true; }
       try {
@@ -263,8 +354,8 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
         json(res, 400, { error: error.message });
         return true;
       }
-      const previous = entry.type === 'nutrition'
-        ? workspace.records.filter(record => record.type !== 'nutrition' || record.date !== entry.date)
+      const previous = ['nutrition', 'training'].includes(entry.type)
+        ? workspace.records.filter(record => recordKey(record) !== recordKey(entry))
         : workspace.records;
       const next = [...previous, entry];
       try {

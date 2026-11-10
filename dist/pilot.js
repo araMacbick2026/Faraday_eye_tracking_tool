@@ -16,6 +16,9 @@ const toolbar = document.querySelector('.pilot-toolbar');
 const logout = document.querySelector('#pilot-logout');
 const headerNote = document.querySelector('#pilot-header-note');
 const summary = document.querySelector('#pilot-summary');
+const weeklyOverview = document.querySelector('#pilot-weekly-overview');
+const weeklyTrends = document.querySelector('#pilot-weekly-trends');
+const trainingLog = document.querySelector('#pilot-training-log');
 const forms = document.querySelector('#pilot-forms');
 const actions = document.querySelector('#pilot-actions');
 const actionButtons = document.querySelector('#pilot-action-buttons');
@@ -39,13 +42,13 @@ let studioLoad;
 const roleLabels = { coach: 'Coach', athlete: 'Athlete', parent: 'Parent or guardian' };
 const demoNames = { coach: 'Taylor Reed', athlete: 'Alex Morgan', parent: 'Jamie Morgan' };
 const descriptions = {
-  coach: 'Record skill results and follow-up checks.',
-  athlete: 'Add a practice reflection or a habit check-in.',
+  coach: 'Log training sessions, sports results, and school updates.',
+  athlete: 'Track your goals and check in on meal and water habits.',
   parent: 'Review your linked athlete’s weekly progress.'
 };
 const actionLabels = {
   measurement: 'Athlete measurement', skill: 'Practice result', followup: 'Learning check', school: 'School update',
-  reflection: 'Practice reflection', nutrition: 'Nutrition check-in'
+  reflection: 'Practice reflection', nutrition: 'Nutrition check-in', training: 'Training session', goal: 'Personal goal'
 };
 const outcomeLabels = { independent: 'Applied without a reminder', prompted: 'Applied with a reminder', 'not yet': 'Not yet applied' };
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' });
@@ -74,8 +77,8 @@ function card(title, text, detail = '') {
     escape(text) + '</p>' + (detail ? '<p class="pilot-detail">' + escape(detail) + '</p>' : '') + '</article>';
 }
 
-function latest(records, type) {
-  return records.filter(record => record.type === type).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+function latest(records, type, match = () => true) {
+  return records.filter(record => record.type === type && match(record)).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
 }
 
 function form(type, title, fields, date) {
@@ -86,6 +89,82 @@ function form(type, title, fields, date) {
 
 const notes = '<label>Update <textarea name="note" maxlength="500" required></textarea></label>';
 const optionalNotes = '<label>Coach note <textarea name="note" maxlength="500"></textarea></label>';
+const percent = value => new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value) + '%';
+const passingRate = sports => sports ? 100 * sports.successful / sports.attempts : null;
+const attendanceRate = attendance => percent(100 * attendance.present / attendance.scheduled);
+
+function weeklyStat(label, value, detail) {
+  return '<article class="pilot-card pilot-weekly-stat"><h3>' + escape(label) + '</h3><p class="pilot-weekly-value">' +
+    escape(value ?? '—') + '</p><p class="pilot-detail">' + escape(detail) + '</p></article>';
+}
+
+function renderTrends(trends, demo) {
+  const series = [
+    { label: 'Academic average', style: 'school', values: trends.map(week => week.grade?.value ?? null) },
+    { label: 'Passing accuracy', style: 'sport', values: trends.map(week => passingRate(week.sports)) }
+  ];
+  const point = (value, index) => [58 + index * 154, 134 - value * 1.12];
+  const axes = [0, 25, 50, 75, 100].map(value => {
+    const [, y] = point(value, 0);
+    return '<text x="44" y="' + (y + 4) + '" text-anchor="end">' + value + '%</text>' +
+      '<line class="pilot-trend-rule" x1="58" x2="520" y1="' + y + '" y2="' + y + '"/>';
+  }).join('');
+  const lines = series.map(({ style, values }) => '<g class="pilot-trend-' + style + '">' +
+    values.map((value, index) => {
+      if (value === null) return '';
+      const [x, y] = point(value, index);
+      const previous = index && values[index - 1] !== null ? point(values[index - 1], index - 1) : null;
+      return (previous ? '<path d="M' + previous.join(' ') + ' L' + x + ' ' + y + '"/>' : '') +
+        '<circle cx="' + x + '" cy="' + y + '" r="4"/>';
+    }).join('') + '</g>').join('');
+  const labels = trends.map(({ weekStart }, index) => '<text x="' + point(0, index)[0] +
+    '" y="154" text-anchor="middle">' + escape(trendDate.format(new Date(weekStart + 'T00:00:00Z'))) + '</text>').join('');
+  const rows = trends.map(({ weekStart }, index) => '<tr><th scope="row">' + escape(dateLabel(weekStart)) + '</th>' +
+    series.map(({ values }) => '<td>' + (values[index] === null ? 'No data' : escape(percent(values[index]))) + '</td>').join('') + '</tr>').join('');
+  weeklyTrends.innerHTML = '<h3>Weekly progress overview</h3><p class="pilot-detail">Four weeks ending with the selected week.' +
+    (demo ? ' Demo figures start with fictional records.' : '') + '</p>' +
+    '<ul class="pilot-trend-key">' + series.map(({ style, label }) => '<li class="pilot-trend-' + style + '">' + label + '</li>').join('') + '</ul>' +
+    '<svg viewBox="0 0 570 165" aria-hidden="true">' + axes + lines + labels + '</svg>' +
+    '<details><summary>See weekly values</summary><div class="pilot-table-wrap"><table><thead><tr><th scope="col">Week of</th>' +
+    series.map(({ label }) => '<th scope="col">' + label + '</th>').join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div></details>';
+}
+
+const trendDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+function renderWeeklyOverview(data) {
+  const { role, weekSummary: { grade, schoolAttendance, sports, training, nutrition }, weekly, goal } = data;
+  const parent = role === 'parent';
+  const count = record => record.present + ' of ' + record.scheduled;
+  weeklyOverview.innerHTML = (parent ? weeklyStat('Academic average', grade && percent(grade.value),
+    grade ? grade.source + ' · ' + dateLabel(grade.date) : 'No grade recorded this week.') +
+    weeklyStat('School attendance', schoolAttendance && attendanceRate(schoolAttendance),
+      schoolAttendance ? count(schoolAttendance) + ' school days · ' + schoolAttendance.source : 'No school attendance recorded this week.') : '') +
+    weeklyStat('Sports progress · Passing', sports && percent(passingRate(sports)),
+      sports ? sports.successful + ' of ' + sports.attempts + ' passes · ' + sports.basis : 'No passing scores recorded this week.') +
+    weeklyStat('Training attendance', training && attendanceRate(training),
+      training ? count(training) + ' logged sessions attended' : 'No attendance recorded this week.') +
+    (nutrition ? weeklyStat('Nutrition check-ins', nutrition.days + ' / 7 days', parent ? 'Shared weekly count' :
+      (nutrition.days ? 'Brought a water bottle on ' + nutrition.hydrated + ' of ' + nutrition.days + ' logged days. ' +
+      (nutrition.mealDays ? 'Regular meals on ' + nutrition.regularMeals + ' of ' + nutrition.mealDays + ' answered days.' : 'No meal responses yet.') :
+      'Log a meal or water habit from Add an update.')) : '') +
+    (role === 'athlete' ? card('My goal', goal?.note || 'Set a personal goal from Add an update.',
+      goal ? (goal.status === 'achieved' ? 'Achieved' : 'In progress') + ' · ' + dateLabel(goal.date) + ' · Only you can see this' : '') : '');
+  weeklyTrends.hidden = !parent;
+  if (parent) renderTrends(data.trends, data.demo);
+  else weeklyTrends.innerHTML = '';
+  trainingLog.hidden = parent;
+  if (parent) trainingLog.innerHTML = '';
+  else {
+    const sessions = weekly.filter(record => record.type === 'training').sort((a, b) => a.date.localeCompare(b.date));
+    const statuses = { present: 'Attended', absent: 'Missed', cancelled: 'Cancelled' };
+    const rows = sessions.map(record => '<tr><td>' + escape(dateLabel(record.date)) + '</td><th scope="row">' + escape(record.name) +
+      (record.note ? '<span class="pilot-detail pilot-training-note">' + escape(record.note) + '</span>' : '') + '</th><td>' +
+      statuses[record.attendance] + '</td><td>' + (record.attempts ? record.successful + ' of ' + record.attempts : '—') + '</td></tr>').join('');
+    trainingLog.innerHTML = '<h3>Training sessions</h3>' + (rows ?
+      '<div class="pilot-table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Session</th><th scope="col">Attendance</th><th scope="col">Successful passes</th></tr></thead><tbody>' +
+      rows + '</tbody></table></div>' : '<p class="pilot-detail">No training sessions logged this week.</p>');
+  }
+}
 
 function updateSignInHint() {
   roleHelp.textContent = descriptions[roleSelect.value];
@@ -165,34 +244,33 @@ function render(data) {
   week.value = weekStart;
   observationTab.hidden = role === 'parent';
   document.querySelector('#pilot-parent-summary-note').hidden = role !== 'parent';
+  document.querySelector('#pilot-demo-note').hidden = !data.demo;
   renderObservation(data.observation);
-  const baseline = history[0];
-  const result = latest(weekly, 'skill');
+  renderWeeklyOverview(data);
   const followup = latest(weekly, 'followup');
-  const school = latest(weekly, 'school');
-  const nutrition = weekly.filter(record => record.type === 'nutrition');
+  const school = latest(weekly, 'school', record => record.note);
   const score = record => record.successful + ' of ' + record.attempts;
-  summary.innerHTML = card('Sports progress · Passing accuracy', result ? score(result) + ' passes on ' + dateLabel(result.date) : 'No practice result this week.',
-    baseline ? 'First result: ' + score(baseline) + ' on ' + dateLabel(baseline.date) + (result?.note ? ' · ' + result.note : '') : '') +
-    card('Skill learning · Apply the cue later', followup ? outcomeLabels[followup.outcome] + ' · ' + dateLabel(followup.date) : 'Follow-up check pending.', followup?.note) +
+  summary.innerHTML = card('Skill learning · Apply the cue later', followup ? outcomeLabels[followup.outcome] + ' · ' + dateLabel(followup.date) : 'Follow-up check pending.', followup?.note) +
     card('Academic progress · Weekly update', school?.note || 'No school update this week.', school ? school.source + ' · ' + dateLabel(school.date) : '');
   if (role !== 'parent') {
     const reflection = latest(weekly, 'reflection');
     summary.innerHTML += card('Athlete reflection', reflection?.note || 'No reflection this week.', reflection?.date);
   }
-  if (role === 'athlete' || (role === 'parent' && data.shareNutrition)) {
-    summary.innerHTML += card('Nutrition · Bring a water bottle',
-      nutrition.length ? nutrition.filter(record => record.outcome === 'yes').length + ' yes out of ' + nutrition.length + ' recorded check-ins.' : 'No check-ins this week.',
-      'Check-ins are reported by the athlete.');
-  }
+  document.querySelector('#pilot-passing-history').hidden = role === 'parent';
   document.querySelector('#pilot-history').innerHTML = history.map(record =>
-    '<tr><td>' + escape(dateLabel(record.date)) + '</td><td>' + escape(score(record)) + '</td></tr>').join('') ||
-    '<tr><td colspan="2">No results for this period.</td></tr>';
+    '<tr><td>' + escape(dateLabel(record.date)) + '</td><td>' + escape(score(record)) + '</td><td>' + escape(record.note || '—') + '</td></tr>').join('') ||
+    '<tr><td colspan="3">No results for this period.</td></tr>';
   forms.innerHTML = '';
   if (role === 'coach') {
     const options = metrics.map(metric => '<option value="' + metric.id + '">' +
       metric.name + ' · ' + metric.unit + '</option>').join('');
-    forms.innerHTML = form('measurement', 'Record an athlete measurement',
+    forms.innerHTML = form('training', 'Log a training session',
+      '<label>Session name <input name="name" maxlength="80" placeholder="e.g. Tuesday team practice" required></label>' +
+      '<label>Attendance <select name="attendance"><option value="present">Attended</option><option value="absent">Missed</option><option value="cancelled">Cancelled</option></select></label>' +
+      '<fieldset><legend>Passing drill (optional)</legend><p class="pilot-detail">Enter both numbers if you tested passing during this session.</p>' +
+      '<label>Attempts <input name="attempts" type="number" min="1" max="1000"></label>' +
+      '<label>Successful passes <input name="successful" type="number" min="0" max="1000"></label></fieldset>' + optionalNotes, data.date) +
+      form('measurement', 'Record an athlete measurement',
       '<label>Test <select name="metricId">' + options + '</select></label>' +
       '<label><span data-result-label>Result</span><input name="value" type="number" inputmode="decimal" required></label>' +
       optionalNotes, data.date) + form('skill', 'Log a passing drill',
@@ -202,11 +280,23 @@ function render(data) {
         '<label>Did the athlete apply the cue? <select name="outcome"><option value="independent">Independently</option><option value="prompted">With a prompt</option><option value="not yet">Not yet</option></select></label>' +
         optionalNotes, data.date) +
       form('school', 'Add a school update from an agreed source',
-        '<label>Source <input name="source" maxlength="80" required></label>' + notes, data.date);
+        '<label>Source <input name="source" maxlength="80" placeholder="e.g. Teacher’s weekly report" required></label>' +
+        '<label>Academic average (%) <input name="grade" type="number" min="0" max="100" step="0.1"></label>' +
+        '<fieldset><legend>School attendance (optional)</legend><p class="pilot-detail">Use totals for the selected school week.</p>' +
+        '<label>Days scheduled <input name="schoolScheduled" type="number" min="1" max="7"></label>' +
+        '<label>Days attended <input name="schoolPresent" type="number" min="0" max="7"></label></fieldset>' +
+        '<label>School note <textarea name="note" maxlength="500"></textarea></label>', data.date);
   } else if (role === 'athlete') {
-    forms.innerHTML = form('reflection', 'Reflect on practice', notes, data.date) +
-      form('nutrition', 'Water bottle check-in',
-        '<label>Did you bring a water bottle? <select name="outcome"><option value="yes">Yes</option><option value="no">No</option></select></label>', data.date);
+    forms.innerHTML = form('goal', 'Set or update your personal goal',
+      '<label>My goal <textarea name="note" maxlength="500" placeholder="e.g. Look up before passing at the next practice" required>' +
+      escape(data.goal?.note) + '</textarea></label>' +
+      '<label>Status <select name="status"><option value="working">In progress</option><option value="achieved"' +
+      (data.goal?.status === 'achieved' ? ' selected' : '') + '>Achieved</option></select></label>', data.date) +
+      form('nutrition', 'Daily nutrition check-in',
+        '<p class="pilot-detail">One check-in per day. Saving again replaces that day’s answers.</p>' +
+        '<label>Did you bring a water bottle today? <select name="outcome" required><option value="">Choose an answer</option><option value="yes">Yes</option><option value="no">No</option></select></label>' +
+        '<label>Were you able to eat your usual meals? <select name="meals"><option value="">Skip this question</option><option value="regular">Yes</option><option value="missed">I missed a meal</option></select></label>', data.date) +
+      form('reflection', 'Reflect on practice', notes, data.date);
   }
   const types = [...forms.querySelectorAll('form')].map(entry => entry.dataset.type);
   reportNav.querySelector('[data-panel="entry"]').hidden = !types.length;
@@ -240,6 +330,9 @@ async function load(date) {
       logout.hidden = true;
       headerNote.hidden = false;
       summary.replaceChildren();
+      weeklyOverview.replaceChildren();
+      weeklyTrends.replaceChildren();
+      trainingLog.replaceChildren();
       observationSummary.replaceChildren();
       clearReport();
       forms.replaceChildren();
@@ -311,6 +404,9 @@ addMeasurement.addEventListener('click', () => {
 });
 forms.addEventListener('change', event => {
   if (event.target.name === 'metricId') setMeasurementUnit();
+  if (event.target.name === 'attendance') {
+    event.target.form.querySelector('fieldset').disabled = event.target.value !== 'present';
+  }
 });
 actionButtons.addEventListener('click', event => {
   const button = event.target.closest('[data-action]');
@@ -325,10 +421,11 @@ forms.addEventListener('submit', async event => {
   const button = element.querySelector('button');
   const entry = { ...Object.fromEntries(new FormData(element)), type: element.dataset.type };
   if (entry.type === 'measurement') entry.value = Number(entry.value);
-  if (entry.type === 'skill') {
-    entry.attempts = Number(entry.attempts);
-    entry.successful = Number(entry.successful);
+  for (const name of ['attempts', 'successful', 'grade', 'schoolScheduled', 'schoolPresent']) {
+    if (entry[name] === '') delete entry[name];
+    else if (name in entry) entry[name] = Number(entry[name]);
   }
+  if (entry.meals === '') delete entry.meals;
   button.disabled = true;
   actionStatus.textContent = '';
   try {

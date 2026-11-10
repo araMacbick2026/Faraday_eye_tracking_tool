@@ -41,6 +41,27 @@
 .pilot-history summary{cursor:pointer;font-family:Georgia,serif;font-size:1.35rem}
 .pilot-history table{margin-top:12px}
 .pilot #pilot-forms{grid-template-columns:minmax(0,460px)}
+.pilot-form fieldset{display:grid;gap:8px;min-width:0;margin:0;padding:10px 12px 12px;border:1px solid var(--line)}
+.pilot-form legend{padding:0 4px;font-weight:600}
+.pilot-form fieldset:disabled{opacity:.55}
+#pilot-weekly-overview{grid-template-columns:repeat(auto-fit,minmax(min(100%,175px),1fr))}
+.pilot-weekly-stat{border-top:2px solid var(--green)}
+.pilot-weekly-stat h3{font:600 .92rem/1.3 'Segoe UI',sans-serif;margin:0}
+.pilot-weekly-stat .pilot-weekly-value{font:2rem/1.3 Georgia,serif;color:var(--ink);margin:6px 0}
+.pilot-weekly-trends{margin:18px 0}
+.pilot-weekly-trends h3{margin:0 0 4px}
+.pilot-weekly-trends svg{width:100%;max-width:730px;display:block;margin:8px 0;font:13px 'Segoe UI',sans-serif;fill:var(--muted)}
+.pilot-weekly-trends details summary{cursor:pointer;font-weight:600}
+.pilot-trend-rule{stroke:var(--line)}
+.pilot-trend-school{color:var(--green)}
+.pilot-trend-sport{color:var(--warning)}
+.pilot-weekly-trends svg g{fill:currentColor;stroke:currentColor}
+.pilot-weekly-trends svg path{fill:none;stroke-width:2.5}
+.pilot-trend-sport path{stroke-dasharray:6 4}
+.pilot-trend-key{display:flex;gap:8px 20px;flex-wrap:wrap;list-style:none;padding:0;margin:12px 0}
+.pilot-trend-key li::before{content:'';display:inline-block;width:22px;border-top:2px solid;vertical-align:middle;margin-right:7px}
+.pilot-trend-key .pilot-trend-sport::before{border-top-style:dashed}
+.pilot-training-note{display:block;font-weight:400}
 @media(max-width:680px){.pilot-welcome{grid-template-columns:1fr;gap:14px}.pilot .pilot-header{margin-bottom:22px}.pilot .pilot-main{padding:0 16px 32px}}
 .pilot-report-nav{display:flex;flex-wrap:wrap;gap:4px;margin:20px 0;border-bottom:1px solid var(--line)}
 .pilot .pilot-report-nav button{background:transparent;border:0;border-bottom:3px solid transparent;border-radius:0;color:var(--ink);font:600 .94rem 'Segoe UI',sans-serif;text-align:center;justify-content:center;}

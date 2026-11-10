@@ -118,13 +118,72 @@ test('local preview starts at the role picker without codes', async () => {
       assert.ok(data.reference['sprint-ice'] > 0);
       assert.equal(data.athlete.name, 'Alex Morgan');
       assert.equal(data.weekly.find(item => item.type === 'followup').outcome, 'independent');
-      assert.equal(data.weekly.filter(item => item.type === 'nutrition').length, role === 'coach' ? 0 : 2);
+      assert.equal(data.weekly.filter(item => item.type === 'nutrition').length, role === 'coach' ? 0 : 5);
       assert.equal(data.weekly.some(item => item.type === 'reflection'), role !== 'parent');
       if (role !== 'parent') assert.match(await studio.text(), /Observation studio/);
       await app.request('/pilot/api/logout', post({}, cookie));
       assert.equal((await app.request('/pilot/studio', { headers: { cookie }, redirect: 'manual' })).status, 302);
     }
     assert.equal((await app.request('/pilot/api/login', post({ role: 'admin' }))).status, 401);
+  } finally { await app.close(); }
+});
+
+test('training, school, and athlete updates feed the correct weekly dashboards', async () => {
+  const app = await start({ PILOT_SHARE_NUTRITION: 'true' }, { localPreview: true });
+  try {
+    const cookies = {};
+    for (const role of ['coach', 'athlete', 'parent']) {
+      const response = await app.request('/pilot/api/login', post({ role }));
+      cookies[role] = response.headers.get('set-cookie').split(';')[0];
+    }
+    const date = '2026-11-23';
+    const report = async (role, day = date) =>
+      (await app.request('/pilot/api/progress?date=' + day, { headers: { cookie: cookies[role] } })).json();
+    const add = (role, entry) => app.request('/pilot/api/entries', post({ date, ...entry }, cookies[role]));
+    const demo = await report('parent', '2026-11-09');
+    assert.equal(demo.weekSummary.grade.value, 88);
+    assert.deepEqual(demo.trends.map(week => week.sports.successful), [29, 34, 38, 41]);
+    assert.deepEqual(demo.weekSummary.nutrition, { days: 5 });
+
+    const session = { type: 'training', name: 'Team practice', attendance: 'present', attempts: 20, successful: 12, note: 'Coach only' };
+    assert.equal((await add('athlete', session)).status, 403);
+    assert.equal((await add('coach', { ...session, attendance: 'absent' })).status, 400);
+    assert.equal((await add('coach', { ...session, successful: 21 })).status, 400);
+    assert.equal((await add('coach', session)).status, 201);
+    assert.equal((await add('coach', { ...session, name: 'team practice', successful: 16 })).status, 201);
+    assert.equal((await add('coach', { type: 'training', name: 'Extra practice', attendance: 'absent' })).status, 201);
+    assert.equal((await add('coach', { type: 'training', name: 'Cancelled practice', attendance: 'cancelled' })).status, 201);
+    const school = { type: 'school', source: 'Sample teacher', grade: 0, schoolPresent: 4, schoolScheduled: 5 };
+    assert.equal((await add('coach', { ...school, schoolPresent: 6 })).status, 400);
+    assert.equal((await add('coach', school)).status, 201);
+    assert.equal((await add('coach', { type: 'school', source: 'Sample teacher', note: 'New school note', date: '2026-11-24' })).status, 201);
+    const goal = { type: 'goal', note: 'Practise looking up', status: 'achieved' };
+    assert.equal((await add('coach', goal)).status, 403);
+    assert.equal((await add('athlete', goal)).status, 201);
+    assert.equal((await add('athlete', { type: 'nutrition', outcome: 'yes', meals: 'regular' })).status, 201);
+    assert.equal((await add('athlete', { type: 'nutrition', outcome: 'no', meals: 'missed' })).status, 201);
+    assert.equal((await add('parent', school)).status, 403);
+
+    const parent = await report('parent');
+    assert.equal(parent.weekSummary.grade.value, 0);
+    assert.equal(parent.weekSummary.schoolAttendance.present, 4);
+    assert.deepEqual(parent.weekSummary.training, { present: 1, scheduled: 2 });
+    assert.deepEqual(parent.weekSummary.sports, { attempts: 20, successful: 16, basis: 'Training sessions' });
+    assert.deepEqual(parent.weekSummary.nutrition, { days: 1 });
+    assert.deepEqual(parent.weekly.find(record => record.type === 'nutrition'), { type: 'nutrition', date });
+    assert.equal(parent.weekly.some(record => record.type === 'goal' || record.note === 'Coach only'), false);
+    assert.equal(parent.trends[2].sports, null);
+    assert.equal(parent.trends[2].grade, null);
+    assert.equal(parent.trends[3].grade.value, 0);
+    assert.equal(parent.trends[3].sports.successful, 16);
+    const athlete = await report('athlete');
+    assert.equal(athlete.goal.status, 'achieved');
+    assert.equal(athlete.weekSummary.nutrition.regularMeals, 0);
+    assert.equal(athlete.weekSummary.nutrition.days, 1);
+    const coach = await report('coach');
+    assert.equal(coach.weekly.filter(record => record.note === 'Coach only').length, 1);
+    assert.equal(coach.weekSummary.nutrition, null);
+    assert.equal(coach.goal, undefined);
   } finally { await app.close(); }
 });
 
@@ -206,7 +265,7 @@ test('hosted demo starts at sign-in and loads sample data without exposing PINs'
       const data = await (await app.request('/pilot/api/progress', { headers: { cookie } })).json();
       assert.equal(new Set(data.measurements.map(item => item.metricId)).size, 14);
       assert.ok(data.weekly.some(item => item.type === 'followup'));
-      assert.equal(data.weekly.filter(item => item.type === 'nutrition').length, role === 'coach' ? 0 : 2);
+      assert.equal(data.weekly.filter(item => item.type === 'nutrition').length, role === 'coach' ? 0 : 5);
       if (role === 'coach') {
         assert.equal(data.observation, null);
         assert.equal((await app.request('/pilot/api/observations', post({ ...summary, coverage: 101 }, cookie))).status, 400);

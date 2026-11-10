@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Faraday | Athlete Pilot</title>
-  <link rel="stylesheet" href="/style.css?v=15">
-  <script type="module" src="/pilot.js?v=29"></script>
+  <link rel="stylesheet" href="/style.css?v=16">
+  <script type="module" src="/pilot.js?v=30"></script>
 </head>
 <body class="pilot">
   <main class="pilot-main">
@@ -27,9 +27,9 @@
       <div class="pilot-welcome-guide">
         <h2>Three views of the same progress</h2>
         <dl>
-          <dt>Coach</dt><dd>Record a measurement, practice result, learning check, or school update.</dd>
-          <dt>Athlete</dt><dd>View your performance, reflect on practice, or record a nutrition check-in.</dd>
-          <dt>Parent or guardian</dt><dd>See sports and academic progress together, plus shared nutrition check-ins.</dd>
+          <dt>Coach</dt><dd>Record training attendance, sports results, and school updates.</dd>
+          <dt>Athlete</dt><dd>See your progress, set a goal, and check in on meal and water habits.</dd>
+          <dt>Parent or guardian</dt><dd>See grades, attendance, and sports progress in one weekly report.</dd>
         </dl>
         <p class="pilot-detail">Sign out to switch roles.</p>
       </div>
@@ -62,11 +62,15 @@
       </section>
       <section id="pilot-weekly" aria-labelledby="pilot-weekly-title" hidden>
         <h2 id="pilot-weekly-title">Weekly progress</h2>
-        <p id="pilot-parent-summary-note" class="pilot-detail" hidden>See your linked athlete’s sports and school updates together. Use the date selector to review another week.</p>
+        <p id="pilot-parent-summary-note" class="pilot-detail" hidden>Use the date selector to review another week.</p>
+        <p id="pilot-demo-note" class="pilot-detail" hidden>Demo workspace · Starts with fictional athlete records.</p>
+        <div id="pilot-weekly-overview" class="pilot-grid"></div>
+        <section id="pilot-weekly-trends" class="pilot-card pilot-weekly-trends" aria-label="Weekly progress overview" hidden></section>
+        <section id="pilot-training-log" class="pilot-card pilot-weekly-trends" aria-label="Training sessions" hidden></section>
         <div id="pilot-summary" class="pilot-grid"></div>
-        <details class="pilot-card pilot-history" open>
-          <summary>Passing history</summary>
-          <table><thead><tr><th scope="col">Date</th><th scope="col">Successful passes</th></tr></thead><tbody id="pilot-history"></tbody></table>
+        <details id="pilot-passing-history" class="pilot-card pilot-history">
+          <summary>Individual passing drill history</summary>
+          <div class="pilot-table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Successful passes</th><th scope="col">Note</th></tr></thead><tbody id="pilot-history"></tbody></table></div>
         </details>
       </section>
       <section id="pilot-eye-tracking" aria-labelledby="pilot-eye-title" hidden>
