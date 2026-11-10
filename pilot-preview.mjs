@@ -13,5 +13,5 @@ const port = Number(process.env.PILOT_PREVIEW_PORT || 4180);
 server.listen(port, '127.0.0.1', () => {
   const address = 'http://127.0.0.1:' + server.address().port + '/';
   console.log('Pilot preview: ' + address);
-  console.log('Choose Coach or Athlete. No access code is needed.');
+  console.log('Choose Coach, Athlete, or Parent. No access code is needed.');
 });

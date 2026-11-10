@@ -133,7 +133,6 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
   const dataFile = env.PILOT_DATA_FILE;
   const publicDemo = !localPreview && env.PILOT_DEMO === 'true' && env.PILOT_OPEN_DEMO === 'true' && !dataFile;
   const openDemo = localPreview || publicDemo;
-  const availableRoles = openDemo ? ['coach', 'athlete'] : roles;
   const codes = Object.fromEntries(roles.map(role => [role, env['PILOT_' + role.toUpperCase() + '_CODE']]));
   const distinctCodes = new Set(Object.values(codes)).size === roles.length;
   const fourDigitCodes = !openDemo && env.PILOT_DEMO === 'true' && !dataFile &&
@@ -164,7 +163,7 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       return true;
     }
     if (pathname === '/pilot/api/setup' && req.method === 'GET') {
-      json(res, 200, { enabled, demo: demoData, openDemo, roles: availableRoles, fourDigitCodes });
+      json(res, 200, { enabled, demo: demoData, openDemo, roles, fourDigitCodes });
       return true;
     }
     if (!enabled && !studio) { json(res, 503, { error: 'Pilot sign-in has not been configured.' }); return true; }
@@ -197,7 +196,7 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       if (!openDemo && attempts.count >= 12) { json(res, 429, { error: 'Too many attempts. Try again in a minute.' }); return true; }
       try {
         const input = await readJson(req);
-        if (!availableRoles.includes(input.role) || (!openDemo && (typeof input.code !== 'string' ||
+        if (!roles.includes(input.role) || (!openDemo && (typeof input.code !== 'string' ||
             !timingSafeEqual(digest(input.code), digest(codes[input.role]))))) throw new Error();
         const id = randomBytes(32).toString('hex');
         sessions.delete(sessionId);
@@ -209,7 +208,7 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
           attempts.count++;
           failures.set(key, attempts);
         }
-        json(res, 401, { error: openDemo ? 'Choose Coach or Athlete to open the demo.' : 'The role or access code did not match.' });
+        json(res, 401, { error: openDemo ? 'Choose a listed role to open the demo.' : 'The role or access code did not match.' });
       }
       return true;
     }

@@ -31,7 +31,7 @@ const panels = {
   observation: document.querySelector('#pilot-eye-tracking'),
   entry: actions
 };
-let selectedPanel = location.hash === '#eye-tracking' ? 'observation' : 'report';
+let selectedPanel = location.hash === '#eye-tracking' ? 'observation' : undefined;
 let studioLoad;
 const roleLabels = { coach: 'Coach', athlete: 'Athlete', parent: 'Parent or guardian' };
 const demoNames = { coach: 'Taylor Reed', athlete: 'Alex Morgan', parent: 'Jamie Morgan' };
@@ -156,11 +156,12 @@ function renderObservation(observation) {
 
 function render(data) {
   const { role, athlete, history, weekly, weekStart, weekEnd } = data;
-  title.textContent = athlete.name + ' · ' + roleLabels[role] + ' view';
+  title.textContent = athlete.name + ' · ' + (role === 'parent' ? 'Parent dashboard' : roleLabels[role] + ' view');
   document.querySelector('#pilot-intro').textContent = [athlete.team, athlete.position, athlete.season].filter(Boolean).join(' · ');
   period.textContent = dateLabel(weekStart) + ' to ' + dateLabel(weekEnd);
   week.value = weekStart;
   observationTab.hidden = role === 'parent';
+  document.querySelector('#pilot-parent-summary-note').hidden = role !== 'parent';
   renderObservation(data.observation);
   const baseline = history[0];
   const result = latest(weekly, 'skill');
@@ -168,10 +169,10 @@ function render(data) {
   const school = latest(weekly, 'school');
   const nutrition = weekly.filter(record => record.type === 'nutrition');
   const score = record => record.successful + ' of ' + record.attempts;
-  summary.innerHTML = card('Sports · Passing accuracy', result ? score(result) + ' passes on ' + dateLabel(result.date) : 'No practice result this week.',
+  summary.innerHTML = card('Sports progress · Passing accuracy', result ? score(result) + ' passes on ' + dateLabel(result.date) : 'No practice result this week.',
     baseline ? 'First result: ' + score(baseline) + ' on ' + dateLabel(baseline.date) + (result?.note ? ' · ' + result.note : '') : '') +
-    card('Learning · Use the cue later', followup ? outcomeLabels[followup.outcome] + ' · ' + dateLabel(followup.date) : 'Follow-up check pending.', followup?.note) +
-    card('School · Weekly update', school?.note || 'No school update this week.', school ? school.source + ' · ' + dateLabel(school.date) : '');
+    card('Skill learning · Apply the cue later', followup ? outcomeLabels[followup.outcome] + ' · ' + dateLabel(followup.date) : 'Follow-up check pending.', followup?.note) +
+    card('Academic progress · Weekly update', school?.note || 'No school update this week.', school ? school.source + ' · ' + dateLabel(school.date) : '');
   if (role !== 'parent') {
     const reflection = latest(weekly, 'reflection');
     summary.innerHTML += card('Athlete reflection', reflection?.note || 'No reflection this week.', reflection?.date);
@@ -209,8 +210,8 @@ function render(data) {
   addMeasurement.hidden = role !== 'coach';
   if (role === 'coach') setMeasurementUnit();
   renderReport(data);
-  if (selectedPanel === 'entry' && !types.length || selectedPanel === 'observation' && observationTab.hidden) {
-    selectedPanel = 'report';
+  if (!selectedPanel || (selectedPanel === 'entry' && !types.length) || (selectedPanel === 'observation' && observationTab.hidden)) {
+    selectedPanel = role === 'parent' ? 'weekly' : 'report';
   }
   selectPanel(selectedPanel);
   actionButtons.innerHTML = types.map(type =>
@@ -338,7 +339,7 @@ document.querySelector('#pilot-logout').addEventListener('click', async () => {
     await api('logout', {});
     closeStudio();
     selectedAction = undefined;
-    selectedPanel = 'report';
+    selectedPanel = undefined;
     actionStatus.textContent = '';
     status.textContent = 'Signed out. Choose a role to continue.';
     await load();
@@ -364,10 +365,8 @@ async function initialize() {
     }
     codeField.hidden = setup.openDemo;
     code.disabled = setup.openDemo;
-    document.querySelectorAll('[data-parent-guide]').forEach(element => element.hidden = setup.openDemo);
     if (setup.openDemo) {
       document.querySelector('#pilot-login-title').textContent = 'Choose your demo view';
-      document.querySelector('#pilot-family-note').hidden = false;
     } else if (setup.fourDigitCodes) {
       codeField.querySelector('span').textContent = '4-digit access code';
       code.inputMode = 'numeric';

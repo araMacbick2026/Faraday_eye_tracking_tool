@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Faraday | Athlete Pilot</title>
   <link rel="stylesheet" href="/style.css?v=12">
-  <script type="module" src="/pilot.js?v=19"></script>
+  <script type="module" src="/pilot.js?v=20"></script>
 </head>
 <body class="pilot">
   <main class="pilot-main">
@@ -27,9 +27,8 @@
         <dl>
           <dt>Coach</dt><dd>Record a measurement, practice result, learning check, or school update.</dd>
           <dt>Athlete</dt><dd>View your performance, reflect on practice, or record a nutrition check-in.</dd>
-          <dt data-parent-guide hidden>Parent or guardian</dt><dd data-parent-guide hidden>See your linked athlete’s report card and weekly progress.</dd>
+          <dt>Parent or guardian</dt><dd>See sports and academic progress together, plus shared nutrition check-ins.</dd>
         </dl>
-        <p id="pilot-family-note" class="pilot-detail" hidden>Parents and guardians can use the Athlete view to see their child’s progress in this demo.</p>
         <p class="pilot-detail">Sign out to switch roles.</p>
       </div>
     </div>
@@ -62,6 +61,7 @@
       </section>
       <section id="pilot-weekly" aria-labelledby="pilot-weekly-title" hidden>
         <h2 id="pilot-weekly-title">Weekly progress</h2>
+        <p id="pilot-parent-summary-note" class="pilot-detail" hidden>See your linked athlete’s sports and school updates together. Use the date selector to review another week.</p>
         <div id="pilot-summary" class="pilot-grid"></div>
         <details class="pilot-card pilot-history" open>
           <summary>Passing history</summary>
