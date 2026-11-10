@@ -5,22 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Faraday | Athlete Pilot</title>
   <link rel="stylesheet" href="/style.css?v=12">
-  <script type="module" src="/pilot.js?v=18"></script>
+  <script type="module" src="/pilot.js?v=19"></script>
 </head>
 <body class="pilot">
   <main class="pilot-main">
     <header class="pilot-header"><a href="/pilot/">Faraday</a><span>ATHLETE PERFORMANCE</span></header>
     <p class="eyebrow">ATHLETE PILOT · FICTIONAL HOCKEY ROSTER</p>
     <h1 id="pilot-title">Athlete progress</h1>
-    <p id="pilot-intro">Try the coach, athlete, or family view with one sample athlete.</p>
+    <p id="pilot-intro">Explore Faraday with one sample athlete.</p>
     <p id="pilot-status" role="status"></p>
     <div id="pilot-welcome" class="pilot-welcome">
       <form id="pilot-login" class="pilot-card pilot-form">
-        <h2>Sign in</h2>
-        <label>Your role <select name="role"><option value="coach">Coach</option><option value="athlete">Athlete</option><option value="parent">Parent or guardian</option></select></label>
+        <h2 id="pilot-login-title">Sign in</h2>
+        <label>Your role <select name="role"><option value="coach">Coach</option><option value="athlete">Athlete</option><option value="parent" hidden>Parent or guardian</option></select></label>
         <p id="pilot-role-help" class="pilot-detail">Record skill results and follow-up checks.</p>
-        <label id="pilot-code-field"><span>Access code</span><input name="code" type="password" autocomplete="current-password" required></label>
-        <p id="pilot-code-help" class="pilot-detail" hidden>Local demo access is filled in for the selected role.</p>
+        <label id="pilot-code-field" hidden><span>Access code</span><input name="code" type="password" autocomplete="current-password" disabled required></label>
         <button type="submit" disabled>Open dashboard</button>
       </form>
       <div class="pilot-welcome-guide">
@@ -28,8 +27,9 @@
         <dl>
           <dt>Coach</dt><dd>Record a measurement, practice result, learning check, or school update.</dd>
           <dt>Athlete</dt><dd>View your performance, reflect on practice, or record a nutrition check-in.</dd>
-          <dt>Parent or guardian</dt><dd>See your linked athlete’s report card and weekly progress.</dd>
+          <dt data-parent-guide hidden>Parent or guardian</dt><dd data-parent-guide hidden>See your linked athlete’s report card and weekly progress.</dd>
         </dl>
+        <p id="pilot-family-note" class="pilot-detail" hidden>Parents and guardians can use the Athlete view to see their child’s progress in this demo.</p>
         <p class="pilot-detail">Sign out to switch roles.</p>
       </div>
     </div>

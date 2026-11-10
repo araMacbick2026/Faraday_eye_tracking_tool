@@ -129,19 +129,20 @@ async function readJson(req) {
   return parsed;
 }
 
-const demoPins = { coach: '2468', athlete: '3579', parent: '4680' };
-
 export function createPilot(env = process.env, { localPreview = false } = {}) {
-  const codes = localPreview ? demoPins : Object.fromEntries(roles.map(role => [role, env['PILOT_' + role.toUpperCase() + '_CODE']]));
+  const dataFile = env.PILOT_DATA_FILE;
+  const publicDemo = !localPreview && env.PILOT_DEMO === 'true' && env.PILOT_OPEN_DEMO === 'true' && !dataFile;
+  const openDemo = localPreview || publicDemo;
+  const availableRoles = openDemo ? ['coach', 'athlete'] : roles;
+  const codes = Object.fromEntries(roles.map(role => [role, env['PILOT_' + role.toUpperCase() + '_CODE']]));
   const distinctCodes = new Set(Object.values(codes)).size === roles.length;
-  const fourDigitCodes = !localPreview && env.PILOT_DEMO === 'true' && !env.PILOT_DATA_FILE &&
+  const fourDigitCodes = !openDemo && env.PILOT_DEMO === 'true' && !dataFile &&
     distinctCodes && roles.every(role => /^[0-9]{4}$/.test(codes[role] ?? ''));
-  const enabled = localPreview || fourDigitCodes || (distinctCodes && roles.every(role => codes[role]?.length >= 16));
+  const enabled = openDemo || fourDigitCodes || (distinctCodes && roles.every(role => codes[role]?.length >= 16));
 
   const hostedDemo = enabled && env.PILOT_DEMO === 'true';
   const demoData = localPreview || hostedDemo;
   const shareNutrition = env.PILOT_SHARE_NUTRITION === 'true';
-  const dataFile = env.PILOT_DATA_FILE;
   let records = enabled && dataFile && existsSync(dataFile) ? JSON.parse(readFileSync(dataFile, 'utf8')) : structuredClone(sample);
   if (demoData) {
     const recordedDays = new Set(records.map(record => record.type + '/' + record.date));
@@ -150,7 +151,7 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
   }
   const sessions = new Map();
   const failures = new Map();
-  let observation = null;
+  const sharedWorkspace = { records, observation: null };
   const secure = env.NODE_ENV === 'production' ? '; Secure' : '';
   const cookie = value => 'faraday_pilot=' + value + '; Path=/pilot; HttpOnly; SameSite=Strict' + secure;
   const digest = value => createHash('sha256').update(value).digest();
@@ -163,14 +164,14 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       return true;
     }
     if (pathname === '/pilot/api/setup' && req.method === 'GET') {
-      json(res, 200, { enabled, demoPins: localPreview ? demoPins : null,
-        ...(hostedDemo ? { demo: true } : {}), ...(fourDigitCodes ? { fourDigitCodes: true } : {}) });
+      json(res, 200, { enabled, demo: demoData, openDemo, roles: availableRoles, fourDigitCodes });
       return true;
     }
     if (!enabled && !studio) { json(res, 503, { error: 'Pilot sign-in has not been configured.' }); return true; }
     const sessionId = /(?:^|;\s*)faraday_pilot=([a-f0-9]+)/.exec(req.headers.cookie || '')?.[1];
-    const session = sessions.get(sessionId);
-    const role = session?.expires > Date.now() ? session.role : null;
+    const previousSession = sessions.get(sessionId);
+    const session = previousSession?.expires > Date.now() ? previousSession : null;
+    const role = session?.role;
 
     if (studio) {
       res.setHeader('Cache-Control', 'no-store');
@@ -193,29 +194,38 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       for (const [key, value] of failures) if (value.until <= now) failures.delete(key);
       const key = req.socket.remoteAddress;
       const attempts = failures.get(key) || { count: 0, until: now + 60000 };
-      if (attempts.count >= 12) { json(res, 429, { error: 'Too many attempts. Try again in a minute.' }); return true; }
+      if (!openDemo && attempts.count >= 12) { json(res, 429, { error: 'Too many attempts. Try again in a minute.' }); return true; }
       try {
         const input = await readJson(req);
-        if (!roles.includes(input.role) || typeof input.code !== 'string' ||
-            !timingSafeEqual(digest(input.code), digest(codes[input.role]))) throw new Error();
+        if (!availableRoles.includes(input.role) || (!openDemo && (typeof input.code !== 'string' ||
+            !timingSafeEqual(digest(input.code), digest(codes[input.role]))))) throw new Error();
         const id = randomBytes(32).toString('hex');
         sessions.delete(sessionId);
-        sessions.set(id, { role: input.role, expires: now + 8 * 3600000 });
+        const workspace = publicDemo ? session?.workspace ?? { records, observation: null } : sharedWorkspace;
+        sessions.set(id, { role: input.role, expires: now + 8 * 3600000, workspace });
         json(res, 200, { role: input.role }, { 'Set-Cookie': cookie(id) + '; Max-Age=28800' });
       } catch {
-        attempts.count++;
-        failures.set(key, attempts);
-        json(res, 401, { error: 'The role or access code did not match.' });
+        if (!openDemo) {
+          attempts.count++;
+          failures.set(key, attempts);
+        }
+        json(res, 401, { error: openDemo ? 'Choose Coach or Athlete to open the demo.' : 'The role or access code did not match.' });
       }
       return true;
     }
     if (!role) { json(res, 401, { error: 'Sign in to open the pilot.' }); return true; }
+    const workspace = session.workspace;
 
     if (pathname === '/pilot/api/logout' && req.method === 'POST') {
-      sessions.delete(sessionId);
-      json(res, 200, {}, { 'Set-Cookie': cookie('') + '; Max-Age=0' });
+      if (publicDemo) {
+        session.role = null;
+        json(res, 200, {});
+      } else {
+        sessions.delete(sessionId);
+        json(res, 200, {}, { 'Set-Cookie': cookie('') + '; Max-Age=0' });
+      }
     } else if (pathname === '/pilot/api/progress' && req.method === 'GET') {
-      const visible = records.filter(record => {
+      const visible = workspace.records.filter(record => {
         if (record.type === 'nutrition') return role === 'athlete' || (role === 'parent' && shareNutrition);
         if (record.type === 'reflection') return role !== 'parent';
         return true;
@@ -232,15 +242,15 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       const measurements = visible.filter(record => record.type === 'measurement' && dateValue(record.date) < end)
         .sort((a, b) => a.date.localeCompare(b.date));
       json(res, 200, { role, athlete, shareNutrition, date, history, weekly, measurements,
-        ...(role !== 'parent' ? { observation } : {}),
+        ...(role !== 'parent' ? { observation: workspace.observation } : {}),
         reference: demoData ? demoReference : null,
         weekStart: new Date(start).toISOString().slice(0, 10),
         weekEnd: new Date(end - 86400000).toISOString().slice(0, 10) });
     } else if (pathname === '/pilot/api/observations' && req.method === 'POST') {
       if (role === 'parent') { json(res, 403, { error: 'This role cannot save an observation.' }); return true; }
       try {
-        observation = observationSummary(await readJson(req), role);
-        json(res, 201, { observation });
+        workspace.observation = observationSummary(await readJson(req), role);
+        json(res, 201, { observation: workspace.observation });
       } catch (error) {
         json(res, 400, { error: error.message });
       }
@@ -255,15 +265,15 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
         return true;
       }
       const previous = entry.type === 'nutrition'
-        ? records.filter(record => record.type !== 'nutrition' || record.date !== entry.date)
-        : records;
+        ? workspace.records.filter(record => record.type !== 'nutrition' || record.date !== entry.date)
+        : workspace.records;
       const next = [...previous, entry];
       try {
         if (dataFile) {
           writeFileSync(dataFile + '.tmp', JSON.stringify(next), { mode: 0o600 });
           renameSync(dataFile + '.tmp', dataFile);
         }
-        records = next;
+        workspace.records = next;
         json(res, 201, { date: entry.date });
       } catch {
         json(res, 500, { error: 'The entry could not be saved. Try again.' });

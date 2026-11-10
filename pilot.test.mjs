@@ -94,7 +94,7 @@ test('role boundaries, independent weekly inputs, and persistent updates', async
   }
 });
 
-test('local preview starts at sign-in and accepts distinct four-digit PINs', async () => {
+test('local preview starts at the role picker without codes', async () => {
   const app = await start({ PILOT_SHARE_NUTRITION: 'true' }, { localPreview: true });
   try {
     assert.match(await (await app.request('/')).text(), /Your role/);
@@ -104,10 +104,10 @@ test('local preview starts at sign-in and accepts distinct four-digit PINs', asy
     }
     const config = await (await app.request('/pilot/api/setup')).json();
     assert.equal(config.enabled, true);
-    assert.equal(new Set(Object.values(config.demoPins)).size, 3);
-    for (const [role, code] of Object.entries(config.demoPins)) {
-      assert.match(code, /^\d{4}$/);
-      const response = await app.request('/pilot/api/login', post({ role, code }));
+    assert.equal(config.openDemo, true);
+    assert.deepEqual(config.roles, ['coach', 'athlete']);
+    for (const role of config.roles) {
+      const response = await app.request('/pilot/api/login', post({ role }));
       assert.equal(response.status, 200);
       const cookie = response.headers.get('set-cookie').split(';')[0];
       const studio = await app.request('/pilot/studio', { headers: { cookie } });
@@ -124,20 +124,51 @@ test('local preview starts at sign-in and accepts distinct four-digit PINs', asy
       await app.request('/pilot/api/logout', post({}, cookie));
       assert.equal((await app.request('/pilot/studio', { headers: { cookie }, redirect: 'manual' })).status, 302);
     }
-    assert.equal((await app.request('/pilot/api/login', post({ role: 'coach', code: config.demoPins.parent }))).status, 401);
+    assert.equal((await app.request('/pilot/api/login', post({ role: 'parent' }))).status, 401);
   } finally { await app.close(); }
 });
 
 test('four-digit codes are restricted to an in-memory hosted demo with distinct codes', async () => {
-  for (const extra of [{}, { PILOT_DEMO: 'true', PILOT_DATA_FILE: 'records.json' },
+  for (const extra of [{ PILOT_OPEN_DEMO: 'true' }, { PILOT_DEMO: 'true', PILOT_OPEN_DEMO: 'true', PILOT_DATA_FILE: 'records.json' },
     { PILOT_DEMO: 'true', PILOT_PARENT_CODE: '2468' }]) {
     const app = await start({ PILOT_COACH_CODE: '2468', PILOT_ATHLETE_CODE: '3579', PILOT_PARENT_CODE: '4680', ...extra });
     try {
       const config = await (await app.request('/pilot/api/setup')).json();
-      assert.deepEqual(config, { enabled: false, demoPins: null });
+      assert.equal(config.enabled, false);
+      assert.equal(config.openDemo, false);
       assert.equal((await app.request('/pilot/api/login', post({ role: 'coach', code: '2468' }))).status, 503);
     } finally { await app.close(); }
   }
+});
+
+test('public demo opens only coach and athlete and keeps each browser’s changes separate', async () => {
+  const app = await start({ NODE_ENV: 'production', PILOT_DEMO: 'true', PILOT_OPEN_DEMO: 'true' });
+  const signIn = async (role, cookie) => {
+    const response = await app.request('/pilot/api/login', post({ role }, cookie));
+    assert.equal(response.status, 200);
+    return response.headers.get('set-cookie').split(';')[0];
+  };
+  const progress = async cookie => (await app.request('/pilot/api/progress', { headers: { cookie } })).json();
+  try {
+    const setup = await (await app.request('/pilot/api/setup')).json();
+    assert.deepEqual(setup, { enabled: true, demo: true, openDemo: true, roles: ['coach', 'athlete'], fourDigitCodes: false });
+    assert.equal((await app.request('/pilot/api/login', post({ role: 'parent' }))).status, 401);
+    const coach = await signIn('coach');
+    const sample = { type: 'school', date: '2026-11-10', source: 'Sample update', note: 'Demo browser update' };
+    assert.equal((await app.request('/pilot/api/entries', post(sample, coach))).status, 201);
+    const summary = { story: 'A sample story', mode: 'pointer', quality: 'rehearsal-not-gaze',
+      durationMs: 12000, coverage: 95, predictions: 215, beforePx: 12, afterPx: null, pauses: 0 };
+    assert.equal((await app.request('/pilot/api/observations', post(summary, coach))).status, 201);
+    assert.equal((await app.request('/pilot/api/logout', post({}, coach))).status, 200);
+    assert.equal((await app.request('/pilot/api/progress', { headers: { cookie: coach } })).status, 401);
+    const athlete = await signIn('athlete', coach);
+    const sameBrowser = await progress(athlete);
+    assert.equal(sameBrowser.observation.story, summary.story);
+    assert.ok(sameBrowser.weekly.some(item => item.note === sample.note));
+    const anotherBrowser = await progress(await signIn('athlete'));
+    assert.equal(anotherBrowser.observation, null);
+    assert.ok(!anotherBrowser.weekly.some(item => item.note === sample.note));
+  } finally { await app.close(); }
 });
 
 test('hosted demo starts at sign-in and loads sample data without exposing PINs', async () => {
@@ -148,7 +179,9 @@ test('hosted demo starts at sign-in and loads sample data without exposing PINs'
   });
   try {
     assert.match(await (await app.request('/')).text(), /Your role/);
-    assert.deepEqual(await (await app.request('/pilot/api/setup')).json(), { enabled: true, demoPins: null, demo: true, fourDigitCodes: true });
+    assert.deepEqual(await (await app.request('/pilot/api/setup')).json(), {
+      enabled: true, demo: true, openDemo: false, roles: ['coach', 'athlete', 'parent'], fourDigitCodes: true
+    });
     assert.equal((await app.request('/pilot/api/login', post({ role: 'coach', code: demoCodes.parent }))).status, 401);
     assert.equal((await app.request('/pilot/api/login', post({ role: 'coach', code: '381' }))).status, 401);
     assert.equal((await app.request('/studio', { redirect: 'manual' })).headers.get('location'), '/pilot/studio');

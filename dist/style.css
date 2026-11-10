@@ -36,7 +36,6 @@
 .pilot-history summary{cursor:pointer;font-family:Georgia,serif;font-size:1.35rem}
 .pilot-history table{margin-top:12px}
 .pilot #pilot-forms{grid-template-columns:minmax(0,460px)}
-.pilot #pilot-code-help{min-height:1.6em}
 @media(max-width:680px){.pilot-welcome{grid-template-columns:1fr;gap:14px}.pilot .pilot-header{margin-bottom:22px}.pilot .pilot-main{padding:0 16px 32px}}
 .pilot-report-nav{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0;padding-bottom:13px;border-bottom:1px solid var(--line)}
 .pilot-report-nav button[aria-pressed="false"]{background:transparent;color:var(--green)}

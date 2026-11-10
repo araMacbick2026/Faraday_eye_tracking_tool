@@ -7,7 +7,6 @@ const roleSelect = login.elements.role;
 const code = login.elements.code;
 const codeField = document.querySelector('#pilot-code-field');
 const roleHelp = document.querySelector('#pilot-role-help');
-const codeHelp = document.querySelector('#pilot-code-help');
 const signIn = login.querySelector('button');
 const dashboard = document.querySelector('#pilot-dashboard');
 const status = document.querySelector('#pilot-status');
@@ -49,7 +48,6 @@ const outcomeLabels = { independent: 'Applied without a reminder', prompted: 'Ap
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' });
 const dateLabel = value => dateFormat.format(new Date(value + 'T00:00:00Z'));
 let loadSequence = 0;
-let demoPins = null;
 let selectedAction;
 
 function escape(value) {
@@ -88,7 +86,7 @@ const optionalNotes = '<label>Coach note <textarea name="note" maxlength="500"><
 
 function updateSignInHint() {
   roleHelp.textContent = descriptions[roleSelect.value];
-  code.value = demoPins?.[roleSelect.value] ?? '';
+  code.value = '';
 }
 
 function selectAction(type) {
@@ -239,7 +237,7 @@ async function load(date) {
       forms.replaceChildren();
       document.querySelector('#pilot-history').replaceChildren();
       title.textContent = 'Athlete progress';
-      document.querySelector('#pilot-intro').textContent = 'Try the coach, athlete, or family view with one sample athlete.';
+      document.querySelector('#pilot-intro').textContent = 'Explore Faraday with one sample athlete.';
     }
     if (error.status !== 401) status.textContent = error.message;
   }
@@ -356,16 +354,20 @@ async function initialize() {
       status.textContent = 'Pilot sign-in has not been configured.';
       return;
     }
-    demoPins = setup.demoPins;
-    if (demoPins || setup.demo) {
-      for (const option of roleSelect.options) {
-        option.textContent = roleLabels[option.value] + ' · ' + demoNames[option.value];
+    for (const option of [...roleSelect.options]) {
+      if (!setup.roles.includes(option.value)) {
+        option.remove();
+        continue;
       }
+      option.hidden = false;
+      if (setup.demo) option.textContent = roleLabels[option.value] + ' · ' + demoNames[option.value];
     }
-    if (demoPins) {
-      codeField.hidden = true;
-      code.autocomplete = 'off';
-      codeHelp.hidden = false;
+    codeField.hidden = setup.openDemo;
+    code.disabled = setup.openDemo;
+    document.querySelectorAll('[data-parent-guide]').forEach(element => element.hidden = setup.openDemo);
+    if (setup.openDemo) {
+      document.querySelector('#pilot-login-title').textContent = 'Choose your demo view';
+      document.querySelector('#pilot-family-note').hidden = false;
     } else if (setup.fourDigitCodes) {
       codeField.querySelector('span').textContent = '4-digit access code';
       code.inputMode = 'numeric';

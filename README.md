@@ -16,12 +16,14 @@ The Railway URL exposes the demo without the ChatGPT access gate used by Sites. 
 
 ## Athlete pilot
 
-Run `npm run pilot:preview` to open a local preview at http://127.0.0.1:4180/. Choose a role and select **Open dashboard**. The local preview fills the hidden demo PIN automatically. The local PINs are also saved in the ignored `outputs/pilot-access.txt` file. The preview roster is fictional. Changes are saved in `outputs/pilot-preview-data.json` and the nutrition summary is enabled for demonstration. Sign out to try another role.
+Run `npm run pilot:preview` to open a local preview at http://127.0.0.1:4180/. Choose Coach or Athlete and select **Open dashboard**. The fictional local preview opens without a code. Changes are saved in `outputs/pilot-preview-data.json`. Sign out to try the other role.
 
 The coach records the same hockey passing drill, a follow-up learning check, and a school update from an agreed source. The athlete records reflections and one nutrition check-in per day. The parent account is read-only and can see only the linked pilot athlete. Its nutrition summary is optional. The pilot uses manual entry and has no HockeyShare or school-system connection.
 
 To enable the pilot on a hosted server, set distinct, randomly generated `PILOT_COACH_CODE`, `PILOT_ATHLETE_CODE`, and `PILOT_PARENT_CODE` values of at least 16 characters. Use HTTPS and production mode. Set `PILOT_DATA_FILE` to an absolute file path in a writable persistent volume outside `dist`, using one app instance. With no data file, records are in memory. Parent nutrition is off by default and can be enabled with `PILOT_SHARE_NUTRITION=true`. This single-roster pilot uses role access codes. Use individual accounts and athlete assignments before onboarding real families.
 
 Set `PILOT_DEMO=true` to make the sign-in page the hosted landing page and load the fictional report-card and weekly sample data. This in-memory demo also accepts three distinct four-digit codes when `PILOT_DATA_FILE` is unset. Hosted users enter their role's access code manually.
+
+For a shareable demo with no access codes, also set `PILOT_OPEN_DEMO=true` and leave `PILOT_DATA_FILE` unset. The open demo has Coach and Athlete views. Parents use the Athlete view. Each browser starts with its own sample data and keeps its changes when switching roles. Demo changes expire with the session or service restart.
 
 Coach and athlete can run an activity and review its heatmap inside the dashboard's **Eye tracking** tab. Saving updates the latest observation card immediately. Only the story, session counts, and quality metrics are shared with those two roles. Export from the review to keep the full results. Closing the activity or switching tabs disconnects the camera and clears the in-page session. The saved summary is held in memory and resets on restart.
