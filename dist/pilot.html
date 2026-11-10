@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Faraday | Athlete Pilot</title>
   <link rel="stylesheet" href="/style.css?v=11">
-  <script type="module" src="/pilot.js?v=16"></script>
+  <script type="module" src="/pilot.js?v=17"></script>
 </head>
 <body class="pilot">
   <main class="pilot-main">
@@ -19,7 +19,7 @@
         <h2>Sign in</h2>
         <label>Your role <select name="role"><option value="coach">Coach</option><option value="athlete">Athlete</option><option value="parent">Parent or guardian</option></select></label>
         <p id="pilot-role-help" class="pilot-detail">Record skill results and follow-up checks.</p>
-        <label id="pilot-code-field">Access code <input name="code" type="password" autocomplete="current-password" required></label>
+        <label id="pilot-code-field"><span>Access code</span><input name="code" type="password" autocomplete="current-password" required></label>
         <p id="pilot-code-help" class="pilot-detail" hidden>Local demo access is filled in for the selected role.</p>
         <button type="submit" disabled>Open dashboard</button>
       </form>

@@ -133,7 +133,10 @@ const demoPins = { coach: '2468', athlete: '3579', parent: '4680' };
 
 export function createPilot(env = process.env, { localPreview = false } = {}) {
   const codes = localPreview ? demoPins : Object.fromEntries(roles.map(role => [role, env['PILOT_' + role.toUpperCase() + '_CODE']]));
-  const enabled = localPreview || roles.every(role => codes[role]?.length >= 16) && new Set(Object.values(codes)).size === 3;
+  const distinctCodes = new Set(Object.values(codes)).size === roles.length;
+  const fourDigitCodes = !localPreview && env.PILOT_DEMO === 'true' && !env.PILOT_DATA_FILE &&
+    distinctCodes && roles.every(role => /^[0-9]{4}$/.test(codes[role] ?? ''));
+  const enabled = localPreview || fourDigitCodes || (distinctCodes && roles.every(role => codes[role]?.length >= 16));
 
   const hostedDemo = enabled && env.PILOT_DEMO === 'true';
   const demoData = localPreview || hostedDemo;
@@ -160,7 +163,8 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       return true;
     }
     if (pathname === '/pilot/api/setup' && req.method === 'GET') {
-      json(res, 200, { enabled, demoPins: localPreview ? demoPins : null, ...(hostedDemo ? { demo: true } : {}) });
+      json(res, 200, { enabled, demoPins: localPreview ? demoPins : null,
+        ...(hostedDemo ? { demo: true } : {}), ...(fourDigitCodes ? { fourDigitCodes: true } : {}) });
       return true;
     }
     if (!enabled && !studio) { json(res, 503, { error: 'Pilot sign-in has not been configured.' }); return true; }

@@ -319,6 +319,11 @@ async function initialize() {
       codeField.hidden = true;
       code.autocomplete = 'off';
       codeHelp.hidden = false;
+    } else if (setup.fourDigitCodes) {
+      codeField.querySelector('span').textContent = '4-digit access code';
+      code.inputMode = 'numeric';
+      code.pattern = '[0-9]{4}';
+      code.maxLength = 4;
     }
     updateSignInHint();
     signIn.disabled = false;

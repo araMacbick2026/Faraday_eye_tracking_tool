@@ -22,6 +22,6 @@ The coach records the same hockey passing drill, a follow-up learning check, and
 
 To enable the pilot on a hosted server, set distinct, randomly generated `PILOT_COACH_CODE`, `PILOT_ATHLETE_CODE`, and `PILOT_PARENT_CODE` values of at least 16 characters. Use HTTPS and production mode. Set `PILOT_DATA_FILE` to an absolute file path in a writable persistent volume outside `dist`, using one app instance. With no data file, records are in memory. Parent nutrition is off by default and can be enabled with `PILOT_SHARE_NUTRITION=true`. This single-roster pilot uses role access codes. Use individual accounts and athlete assignments before onboarding real families.
 
-Set `PILOT_DEMO=true` to make the sign-in page the hosted landing page and load the fictional report-card and weekly sample data. Hosted users enter their role's access code manually.
+Set `PILOT_DEMO=true` to make the sign-in page the hosted landing page and load the fictional report-card and weekly sample data. This in-memory demo also accepts three distinct four-digit codes when `PILOT_DATA_FILE` is unset. Hosted users enter their role's access code manually.
 
 Coach and athlete can open **Eye tracking** from the dashboard. The studio review offers an explicit save for the latest observation summary. Only its story, session counts, and quality metrics are shared with those two roles. Raw samples, camera frames, and the heatmap stay in the studio. The saved summary is held in memory and resets on restart.

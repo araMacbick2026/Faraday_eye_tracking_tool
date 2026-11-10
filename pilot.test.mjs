@@ -128,28 +128,34 @@ test('local preview starts at sign-in and accepts distinct four-digit PINs', asy
   } finally { await app.close(); }
 });
 
-test('standard server never enables four-digit codes', async () => {
-  const app = await start({ PILOT_COACH_CODE: '2468', PILOT_ATHLETE_CODE: '3579', PILOT_PARENT_CODE: '4680' });
-  try {
-    const config = await (await app.request('/pilot/api/setup')).json();
-    assert.deepEqual(config, { enabled: false, demoPins: null });
-    assert.equal((await app.request('/pilot/api/login', post({ role: 'coach', code: '2468' }))).status, 503);
-  } finally { await app.close(); }
+test('four-digit codes are restricted to an in-memory hosted demo with distinct codes', async () => {
+  for (const extra of [{}, { PILOT_DEMO: 'true', PILOT_DATA_FILE: 'records.json' },
+    { PILOT_DEMO: 'true', PILOT_PARENT_CODE: '2468' }]) {
+    const app = await start({ PILOT_COACH_CODE: '2468', PILOT_ATHLETE_CODE: '3579', PILOT_PARENT_CODE: '4680', ...extra });
+    try {
+      const config = await (await app.request('/pilot/api/setup')).json();
+      assert.deepEqual(config, { enabled: false, demoPins: null });
+      assert.equal((await app.request('/pilot/api/login', post({ role: 'coach', code: '2468' }))).status, 503);
+    } finally { await app.close(); }
+  }
 });
 
 test('hosted demo starts at sign-in and loads sample data without exposing PINs', async () => {
+  const demoCodes = { coach: '0381', athlete: '9145', parent: '5120' };
   const app = await start({
     NODE_ENV: 'production', PILOT_DEMO: 'true', PILOT_SHARE_NUTRITION: 'true',
-    PILOT_COACH_CODE: codes.coach, PILOT_ATHLETE_CODE: codes.athlete, PILOT_PARENT_CODE: codes.parent
+    PILOT_COACH_CODE: demoCodes.coach, PILOT_ATHLETE_CODE: demoCodes.athlete, PILOT_PARENT_CODE: demoCodes.parent
   });
   try {
     assert.match(await (await app.request('/')).text(), /Your role/);
-    assert.deepEqual(await (await app.request('/pilot/api/setup')).json(), { enabled: true, demoPins: null, demo: true });
+    assert.deepEqual(await (await app.request('/pilot/api/setup')).json(), { enabled: true, demoPins: null, demo: true, fourDigitCodes: true });
+    assert.equal((await app.request('/pilot/api/login', post({ role: 'coach', code: demoCodes.parent }))).status, 401);
+    assert.equal((await app.request('/pilot/api/login', post({ role: 'coach', code: '381' }))).status, 401);
     assert.equal((await app.request('/studio', { redirect: 'manual' })).headers.get('location'), '/pilot/studio');
     const summary = { story: 'A sample story', mode: 'pointer', quality: 'rehearsal-not-gaze',
       durationMs: 12000, coverage: 95, predictions: 215, beforePx: 12, afterPx: null, pauses: 0 };
     assert.equal((await app.request('/pilot/api/observations', post(summary))).status, 401);
-    for (const [role, code] of Object.entries(codes)) {
+    for (const [role, code] of Object.entries(demoCodes)) {
       const response = await app.request('/pilot/api/login', post({ role, code }));
       assert.equal(response.status, 200);
       const session = response.headers.get('set-cookie');
