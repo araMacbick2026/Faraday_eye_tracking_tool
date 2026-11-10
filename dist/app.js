@@ -78,13 +78,21 @@ async function startCamera(){
 const R=window.Reliability;
 Object.assign(state,{sequence:0,frameSequence:0,face:null,stableSince:0,pose:null,baseline:null,preChecks:[],postCheck:null,story:null,invalidated:false,interruptions:[],calibrationLog:[],calibrationPoses:[],validationHistory:[],lastPredictionId:0});
 let collecting=false,calSamples=0,calLastFrame=0,calLastAt=0,calSettle=0,calLastProgressAt=0,calAnchor=null,movementSince=0,checkPurpose='pre',checkIndex=0,checkStarted=0,checkLastSlot=-1,checkLastId=0,recordNext=50,badSince=0;
-let calibrationPath=calibration.map((_,i)=>i),refining=false,refinementStarted=false;
+let calibrationPath=calibration.map((_,i)=>i),refinementPath=[],refining=false,refinementStarted=false;
+const gazeWindow=[];
+const gazeFilter={frames:3,maxWindowMs:180};
 const now=()=>performance.now();
+function clearGazeWindow(){gazeWindow.length=0;state.latest=null;}
 function ingest(data){
  if(state.mode!=='camera')return;
- if(!state.face||!data||!Number.isFinite(data.x)||!Number.isFinite(data.y)){state.latest=null;return;}
+ if(!state.face||!data||!Number.isFinite(data.x)||!Number.isFinite(data.y)){clearGazeWindow();return;}
  if(state.latest?.id===state.face.id)return;
- state.latest={x:data.x,y:data.y,t:state.face.t,id:state.face.id};
+ const point={x:data.x,y:data.y,t:state.face.t,id:state.face.id};
+ gazeWindow.push(point);
+ while(gazeWindow.length>gazeFilter.frames||point.t-gazeWindow[0].t>gazeFilter.maxWindowMs)gazeWindow.shift();
+ const filtered=gazeWindow.length===gazeFilter.frames
+  ? {x:R.q(gazeWindow.map(frame=>frame.x),.5),y:R.q(gazeWindow.map(frame=>frame.y),.5)} : point;
+ state.latest={...point,...filtered,rawX:point.x,rawY:point.y};
 }
 function installFaceMonitor(){
  const tracker=webgazer.getTracker();if(tracker.faradayWrapped)return;
@@ -119,7 +127,7 @@ function installFaceMonitor(){
 }
 function faceReady(){return state.mode==='pointer'||!!(state.face&&now()-state.face.t<600&&now()-state.stableSince>=600);}
 function headMoved(){return state.mode==='camera'&&state.face&&state.baseline&&R.positionChanged(state.baseline,state.face);}
-function startMode(mode){if(mode==='pointer')stopCamera();state.mode=mode;state.latest=null;state.preChecks=[];state.invalidated=false;$('#modeBadge').textContent=mode==='camera'?'Camera':'Pointer practice';$('#source').textContent=mode==='camera'?'Webcam estimate':'Pointer (not gaze)';showCalibrationIntro();}
+function startMode(mode){if(mode==='pointer')stopCamera();state.mode=mode;clearGazeWindow();state.preChecks=[];state.invalidated=false;$('#modeBadge').textContent=mode==='camera'?'Camera':'Pointer practice';$('#source').textContent=mode==='camera'?'Webcam estimate':'Pointer (not gaze)';showCalibrationIntro();}
 document.addEventListener('pointermove',e=>{if(state.mode==='pointer')state.latest={x:e.clientX,y:e.clientY,t:now(),id:++state.sequence};});
 function pointerPrediction(){const p=state.latest;return p?{...p,t:now(),id:++state.sequence}:null;}
 function fresh(){const p=state.mode==='pointer'?pointerPrediction():state.latest;return p&&now()-p.t<R.limits.maxAgeMs&&Number.isFinite(p.x)&&Number.isFinite(p.y)?p:null;}
@@ -137,7 +145,7 @@ function showCalibrationIntro(){
 }
 function discardQuickPreview(){
  if(!state.quickPreview)return;
- state.quickPreview=false;state.calibrationLog=[];state.calibrationPoses=[];state.latest=null;
+ state.quickPreview=false;state.calibrationLog=[];state.calibrationPoses=[];clearGazeWindow();
  window.webgazer?.getRegression()[0]?.init();
 }
 function showPreviewCheckIntro(){
@@ -161,13 +169,14 @@ function showPreviewResult(result){
 }
 function placeTarget(pt){$('#target').style.left=pt[0]*innerWidth+'px';$('#target').style.top=pt[1]*innerHeight+'px';}
 function beginCalibration(quick=false){
+ clearGazeWindow();
  state.quickPreview=quick===true&&state.mode==='camera';
  refining=false;refinementStarted=false;calibrationPath=(state.quickPreview?previewCalibration:calibration).map((_,i)=>i);
  phase('calibration',2);
  state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};state.validation=null;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.invalidated=false;state.baseline=null;state.calibrationLog=[];state.calibrationPoses=[];state.calibrationModel=null;
  $('#accuracy').textContent='—';if(state.mode==='camera')webgazer.getRegression()[0].init();calIndex=0;calSamples=0;collecting=false;$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
 }
-function currentCalibrationPoint(){return (state.quickPreview?previewCalibration:calibration)[calibrationPath[calIndex]];}
+function currentCalibrationPoint(){return (refining?refinementPath:state.quickPreview?previewCalibration:calibration)[calibrationPath[calIndex]];}
 function calTarget(){showCalibrationControls();collecting=false;calAnchor=null;calSamples=0;calLastFrame=0;placeTarget(currentCalibrationPoint());$('#target').textContent='+';$('#targetInstruction').textContent=`${state.quickPreview?'Preview setup':refining?'Refinement':'Calibration'} ${calIndex+1}/${calibrationPath.length} · Click once, then look steadily`;$('#targetProgress').textContent='Click the target to start';}
 function clickCalibration(){if(collecting)return;collecting=true;state.trackerError=null;calAnchor=null;calLastProgressAt=now();calSettle=now()+700;calLastAt=0;$('#target').textContent='·';}
 function showCalibrationControls(){
@@ -227,6 +236,7 @@ function beginValidation(purpose='pre'){hideCalibrationControls();checkPurpose=p
 function startCheckTarget(){
  const points=checkPurpose==='preview'?previewChecks:checks;
  if(checkIndex===points.length){activeValidation=null;$('#overlay').hidden=true;finishValidation();return;}
+ if(state.mode==='camera')clearGazeWindow();
  const pt=points[checkIndex];placeTarget(pt);checkStarted=now();checkLastSlot=-1;checkLastId=0;
  activeValidation={point:checkIndex+1,target:{x:pt[0]*innerWidth,y:pt[1]*innerHeight},errors:[],offsets:[],slots:60,freshSlots:0,uniquePredictions:[],missing:0};
  $('#targetInstruction').textContent=`${checkPurpose==='preview'?'Quick preview':checkPurpose==='post'?'After-activity check':'Accuracy check '+(state.preChecks.length+1)+'/2'} · Dot ${checkIndex+1} of ${points.length}`;
@@ -237,7 +247,7 @@ function collectValidation(){
  const elapsed=now()-checkStarted;if(elapsed>=4000){activeValidation.missing=60-activeValidation.freshSlots;validationRows.push(activeValidation);activeValidation=null;checkIndex++;startCheckTarget();return;}
  if(elapsed<1000)return;
  const slot=Math.min(59,Math.floor((elapsed-1000)/50));if(slot===checkLastSlot)return;checkLastSlot=slot;
- const p=fresh();if(p&&faceReady())activeValidation.freshSlots++;if(p&&p.id!==checkLastId&&faceReady()){checkLastId=p.id;activeValidation.errors.push(Math.hypot(p.x-activeValidation.target.x,p.y-activeValidation.target.y));activeValidation.offsets.push({x:p.x-activeValidation.target.x,y:p.y-activeValidation.target.y});activeValidation.uniquePredictions.push(p.id);}
+ const p=fresh();if(p&&faceReady())activeValidation.freshSlots++;if(p&&p.id!==checkLastId&&faceReady()){checkLastId=p.id;activeValidation.errors.push(Math.hypot(p.x-activeValidation.target.x,p.y-activeValidation.target.y));activeValidation.offsets.push({x:p.x-activeValidation.target.x,y:p.y-activeValidation.target.y,...(p.rawX===undefined?{}:{rawX:p.rawX-activeValidation.target.x,rawY:p.rawY-activeValidation.target.y})});activeValidation.uniquePredictions.push(p.id);}
  $('#targetProgress').textContent=`${Math.ceil((4000-elapsed)/1000)} seconds left · Keep looking at the dot`;
 }
 function checkTable(v){return `<table class="quality-table"><thead><tr><th>Target</th><th>Typical distance</th><th>90% of readings within</th><th>Tracking time</th><th>Readings per second</th><th>Result</th></tr></thead><tbody>${v.targets.map(r=>`<tr><td>${r.point}</td><td>${fmt(r.median)}</td><td>${fmt(r.p90)}</td><td>${Math.round(r.coverage*100)}%</td><td>${r.predictionsPerSecond.toFixed(1)}</td><td>${r.pass?'Pass':'Repeat'}</td></tr>`).join('')}</tbody></table>`;}
@@ -245,11 +255,13 @@ function targetMap(v){const w=state.viewport?.width||innerWidth,h=state.viewport
 function diagnosticPanel(v){return `<div class="session-next">${R.diagnose(v).map(m=>`<p>${m}</p>`).join('')}</div>`;}
 function beginRefinement(){
  if(!state.validation||refinementStarted||R.widespreadPositionError(state.validation))return;
- const bad=R.positionFailures(state.validation).sort((a,b)=>b.median-a.median)[0];if(!bad)return;
+ refinementPath=R.refinementTargets(R.positionFailures(state.validation),calibration,innerWidth,innerHeight);
+ if(!refinementPath.length)return;
  refinementStarted=true;
- calibrationPath=R.refinementPoints({x:bad.target.x/innerWidth,y:bad.target.y/innerHeight},calibration);refining=true;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.baseline=null;state.invalidated=false;calIndex=0;phase('calibration',2);$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
+ clearGazeWindow();
+ calibrationPath=refinementPath.map((_,i)=>i);refining=true;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.baseline=null;state.invalidated=false;calIndex=0;phase('calibration',2);$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
 }
-function downloadValidation(){const report={schema:'faraday.validation.v1',exportedAt:new Date().toISOString(),mode:state.mode,thresholds:R.limits,viewport:state.viewport,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validation:state.validation,history:state.validationHistory,nonclinical:true};saveFile(JSON.stringify(report,null,2),'application/json',`faraday-validation-${Date.now()}.json`);}
+function downloadValidation(){const report={schema:'faraday.validation.v1',exportedAt:new Date().toISOString(),mode:state.mode,gazeFilter:state.mode==='camera'?gazeFilter:null,thresholds:R.limits,viewport:state.viewport,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validation:state.validation,history:state.validationHistory,nonclinical:true};saveFile(JSON.stringify(report,null,2),'application/json',`faraday-validation-${Date.now()}.json`);}
 function finishValidation(){
  if(checkPurpose==='preview'){showPreviewResult(R.summarize(validationRows,previewChecks.length));return;}
  const result={...R.summarize(validationRows,checks.length),purpose:checkPurpose,mode:state.mode,checkedAt:new Date().toISOString(),viewport:state.viewport};state.validationHistory.push(result);
@@ -262,7 +274,7 @@ function finishValidation(){
  const heading=result.pass?(ready?'You’re ready to read':'One more check'):'Let’s adjust the setup';
  const passed=result.targets.filter(target=>target.pass).length;
  const primary=result.pass?`<button class="solid" id="nextCheck">${ready?'Choose a story':'Start the second check'}</button>`:
-  canRefine?'<button class="solid" id="refine">Adjust the weak area</button>':'';
+  canRefine?'<button class="solid" id="refine">Adjust the weak areas</button>':'';
  setDesk(`<div class="welcome"><p class="eyebrow">${state.mode==='pointer'?'Pointer practice':'Accuracy check'}</p>
   <h2>${heading}</h2><p>${passed} of ${checks.length} targets passed. ${state.mode==='pointer'?'These results are from your pointer.':''}</p>
   ${result.pass?`<p>${ready?'Choose a story to begin the reading activity.':'A second check makes sure the results hold up.'}</p>`:diagnosticPanel(result)}
@@ -291,6 +303,7 @@ function inside(p,r){return p.x>=r.x&&p.x<=r.x+r.width&&p.y>=r.y&&p.y<=r.y+r.hei
 function captureLayout(){state.activityRect=rectJSON($('#activity').getBoundingClientRect());state.regions=[...document.querySelectorAll('#activity [data-region]')].map(e=>({name:e.dataset.region,rect:rectJSON(e.getBoundingClientRect())}));}
 function startRecording(){
  if(state.mode==='camera'&&(!state.calibrated||state.invalidated||state.preChecks.length<2||!faceReady()||headMoved())){showCalibrationIntro();message('○ Face not steady or position changed · recalibrate');return;}
+ if(state.mode==='camera')clearGazeWindow();
  state.samples=[];state.elapsed=0;state.postCheck=null;state.interruptions=[];state.invalidated=false;state.lastPredictionId=0;recordNext=50;badSince=0;movementSince=0;
  $('#activity').scrollIntoView({block:'center'});captureLayout();state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};
  state.running=true;phase('recording',4);$('#start').outerHTML='<button class="secondary" id="pause">Pause</button><button class="solid" id="finish">Finish reading</button><span id="clock">00:45</span>';$('#shuffle').hidden=true;$('#redo').hidden=true;
@@ -301,7 +314,7 @@ function togglePause(){if(state.running){pauseRecording('Manual pause');return;}
 function addRecordingSlot(t,forceMissing=false){
  if(!state.activityRect)captureLayout();
  const p=forceMissing?null:fresh();const available=!!(p&&faceReady()&&!headMoved());const valid=available&&p.id!==state.lastPredictionId;if(valid)state.lastPredictionId=p.id;
- state.samples.push({t_ms:t,available,prediction_id:valid?p.id:null,prediction_age_ms:p?Math.round(now()-p.t):null,x:valid?Math.round(p.x):null,y:valid?Math.round(p.y):null,valid,reason:valid?'fresh':forceMissing?'scheduler-gap':!p?'missing-or-stale':p.id===state.lastPredictionId?'repeated-prediction':'face-or-position',offscreen:valid&&(p.x<0||p.x>innerWidth||p.y<0||p.y>innerHeight),activity_x:valid?p.x-state.activityRect.x:null,activity_y:valid?p.y-state.activityRect.y:null,region:valid?state.regions.find(r=>inside(p,r.rect))?.name||'outside activity':'missing'});
+ state.samples.push({t_ms:t,available,prediction_id:valid?p.id:null,prediction_age_ms:p?Math.round(now()-p.t):null,x:valid?Math.round(p.x):null,y:valid?Math.round(p.y):null,raw_x:valid?p.rawX??null:null,raw_y:valid?p.rawY??null:null,valid,reason:valid?'fresh':forceMissing?'scheduler-gap':!p?'missing-or-stale':p.id===state.lastPredictionId?'repeated-prediction':'face-or-position',offscreen:valid&&(p.x<0||p.x>innerWidth||p.y<0||p.y>innerHeight),activity_x:valid?p.x-state.activityRect.x:null,activity_y:valid?p.y-state.activityRect.y:null,region:valid?state.regions.find(r=>inside(p,r.rect))?.name||'outside activity':'missing'});
 }
 function tick(time){
  if(state.running){const dt=Math.max(0,time-lastTick);state.elapsed=Math.min(45000,state.elapsed+dt);
@@ -371,13 +384,13 @@ function renderReview(){
  }
 }
 function drawHeatmap(){const c=$('#heatmap'),r=state.activityRect;c.width=r.width;c.height=r.height;const ctx=c.getContext('2d');for(const s of state.samples){if(!s.valid||s.activity_x<0||s.activity_x>r.width||s.activity_y<0||s.activity_y>r.height)continue;const x=s.activity_x,y=s.activity_y;const g=ctx.createRadialGradient(x,y,0,x,y,32);g.addColorStop(0,'rgba(201,86,50,.08)');g.addColorStop(.5,'rgba(219,153,61,.035)');g.addColorStop(1,'rgba(219,153,61,0)');ctx.fillStyle=g;ctx.fillRect(x-32,y-32,64,64);}}
-function sessionReport(){return{schema:'faraday.observatory.v3',exportedAt:new Date().toISOString(),mode:state.mode,nonclinical:true,quality:sessionQuality(),thresholds:R.limits,samplingDefinitions:{available:'Recent prediction (age <250ms), stable visible face and acceptable position; may repeat a callback ID.',valid:'Independent prediction ID selected once; used for spatial density and raw accuracy samples.',coverage:'Available slots divided by scheduled slots; scheduler gaps remain unavailable.'},story:state.story,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validationHistory:state.validationHistory,preChecks:state.preChecks,lastPreCheck:state.validation,postCheck:state.postCheck,positionInvalidated:state.invalidated,interruptions:state.interruptions,duration_ms:Math.round(state.elapsed),sampleIntervalTarget_ms:50,freshSignalCoverage:coverage(),viewport:state.viewport,activityRect:state.activityRect,regions:state.regions,samples:state.samples,limitations:'Engineering heuristics for adult exploratory use. No clinical, attention, fixation, or comprehension inference. Face movement proxy is not a calibrated head pose. Repeated predictions may indicate fresh signal availability, but are excluded from accuracy samples and heatmap density.'};}
-function exportContent(type){const report=sessionReport(),keys=['t_ms','prediction_id','prediction_age_ms','x','y','valid','available','reason','offscreen','activity_x','activity_y','region'];return type==='json'?JSON.stringify(report,null,2):['mode,quality,story_id,'+keys.join(','),...state.samples.map(s=>[state.mode,report.quality,state.story.id,...keys.map(k=>s[k]??'')].join(','))].join('\n');}
+function sessionReport(){return{schema:'faraday.observatory.v3',exportedAt:new Date().toISOString(),mode:state.mode,nonclinical:true,quality:sessionQuality(),gazeFilter:state.mode==='camera'?gazeFilter:null,thresholds:R.limits,samplingDefinitions:{available:'Recent prediction (age <250ms), stable visible face and acceptable position; may repeat a callback ID.',valid:'Independent prediction ID selected once; used for spatial density and raw accuracy samples.',coverage:'Available slots divided by scheduled slots; scheduler gaps remain unavailable.'},story:state.story,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validationHistory:state.validationHistory,preChecks:state.preChecks,lastPreCheck:state.validation,postCheck:state.postCheck,positionInvalidated:state.invalidated,interruptions:state.interruptions,duration_ms:Math.round(state.elapsed),sampleIntervalTarget_ms:50,freshSignalCoverage:coverage(),viewport:state.viewport,activityRect:state.activityRect,regions:state.regions,samples:state.samples,limitations:'Engineering heuristics for adult exploratory use. No clinical, attention, fixation, or comprehension inference. Face movement proxy is not a calibrated head pose. Repeated predictions may indicate fresh signal availability, but are excluded from accuracy samples and heatmap density.'};}
+function exportContent(type){const report=sessionReport(),keys=['t_ms','prediction_id','prediction_age_ms','x','y','valid','available','reason','offscreen','activity_x','activity_y','region','raw_x','raw_y'];return type==='json'?JSON.stringify(report,null,2):['mode,quality,story_id,'+keys.join(','),...state.samples.map(s=>[state.mode,report.quality,state.story.id,...keys.map(k=>s[k]??'')].join(','))].join('\n');}
 function saveFile(content,mime,filename){const url=URL.createObjectURL(new Blob([content],{type:mime}));const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function download(type){saveFile(exportContent(type),type==='json'?'application/json':'text/csv',`faraday-${state.mode}-${state.story.id}-${Date.now()}.${type}`);}
 function cancelTargets(){hideCalibrationControls();collecting=false;activeValidation=null;$('#overlay').hidden=true;if(state.quickPreview||state.phase==='calibration')showCalibrationIntro();else if(checkPurpose==='post'&&state.phase==='postcheck'){state.postCheck=null;renderReview();}else showValidationIntro();}
 $('#cancelTarget').onclick=cancelTargets;
-function reset(){hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;window.webgazer?.getRegression()[0]?.init();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',quickPreview:false,latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],calibrationLog:[],calibrationPoses:[],calibrationModel:null,activityRect:null,regions:[],viewport:null,validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='Choose a way to start';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('Camera disconnected.');}
+function reset(){hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;clearGazeWindow();window.webgazer?.getRegression()[0]?.init();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',quickPreview:false,latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],calibrationLog:[],calibrationPoses:[],calibrationModel:null,activityRect:null,regions:[],viewport:null,validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='Choose a way to start';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('Camera disconnected.');}
 window.addEventListener('resize',()=>{if(!state.mode)return;state.calibrated=false;if(state.phase==='review')return;state.invalidated=true;state.preChecks=[];collecting=false;activeValidation=null;$('#overlay').hidden=true;$('#calStatus').textContent='Window changed';if(['postcheck','post-intro'].includes(state.phase)){state.postCheck=null;renderReview();}else if(['recording','paused'].includes(state.phase)){state.running=false;finish();}else showCalibrationIntro();message('The window size changed. Start the nine dots again.');});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(!$('#overlay').hidden)cancelTargets();if(state.running)pauseRecording('Browser tab hidden');}});
 const studioNav=document.querySelectorAll('nav button[data-view]');

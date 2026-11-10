@@ -25,7 +25,7 @@ assert.ok(Math.hypot(estimate.x-300,estimate.y-240)<15,'A held-out screen positi
 assert.equal(calibratedRidge.predict({features:[NaN,.3]}),null);
 assert.equal(calibratedRidge.addData({features:[.25,.3]},[300,240],'click'),false,'Ordinary clicks never train the model');
 cal.run("state.validation={targets:[{point:1,pass:false,median:350,target:{x:300,y:240}}]};beginRefinement()");
-for(let point=0;point<3;point++){cal.run('clickCalibration()');cal.advance(800);for(let frame=0;frame<15;frame++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${136+point*15+frame},patches:{features:calibration[calibrationPath[${point}]]}};state.stableSince=0;collectCalibration()`);}}
+for(let point=0;point<3;point++){cal.run('clickCalibration()');cal.advance(800);for(let frame=0;frame<15;frame++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${136+point*15+frame},patches:{features:currentCalibrationPoint()}};state.stableSince=0;collectCalibration()`);}}
 assert.equal(calibratedRidge.sampleCount,180);
 cal.run('beginRefinement()');assert.equal(cal.run('state.phase'),'validation');
 cal.run('beginCalibration()');assert.equal(calibratedRidge.sampleCount,0);assert.equal(calibratedRidge.predict({features:[.25,.3]}),null);
@@ -127,7 +127,7 @@ const duplicate=environment();duplicate.run("state.mode='camera';state.face={x:.
 const refine=environment();refine.run("state.mode='camera';state.validation={targets:[{point:1,pass:false,median:350,target:{x:300,y:240}}]};state.calibrationLog=[{point:1,samples:15}];beginRefinement()");assert.equal(refine.run('calibrationPath.length'),3);assert.equal(refine.run('refining'),true);assert.equal(refine.run('state.preChecks.length'),0);
 for(let point=0;point<3;point++){refine.run('clickCalibration()');refine.advance(800);for(let frame=0;frame<15;frame++){refine.advance(140);refine.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${point*15+frame+1}};state.stableSince=0;collectCalibration()`);}}
 assert.equal(refine.run('state.calibrated'),true);assert.equal(refine.stats().training,45);assert.equal(refine.run('state.calibrationLog.length'),4);assert.equal(refine.run('state.phase'),'validation');
-assert.equal(new Set(r.refinementPoints({x:.25,y:.3},[[.1,.18],[.5,.18],[.9,.18],[.1,.5]])).size,3);
+assert.equal(new Set(r.refinementTargets([{target:{x:300,y:240},median:350,p90:420}],[[.1,.18],[.5,.18],[.9,.18],[.1,.5]],1200,800).map(point=>point.join(','))).size,3);
 console.log('PASS: 10 Hz tracker with fresh signal is not falsely marked missing; minimum unique-count gate retained; repeated data never adds heatmap points; 3-point refinement and mandatory independent revalidation.');
 
 const offsets=r.summarize([{point:1,slots:60,freshSlots:60,errors:Array(30).fill(50),offsets:[{x:-30,y:40},{x:-20,y:30},{x:-40,y:50}]}]);assert.equal(offsets.targets[0].offsetX,-30);assert.equal(offsets.targets[0].offsetY,40);
@@ -190,3 +190,31 @@ assert.match(r.previewFeedback(previewRows([495,500,505]),1000).title,/near the 
 assert.match(r.previewFeedback(previewRows([350,660,890]),1000).title,/to the right/);
 assert.match(r.previewFeedback(previewRows([240,540,760],5),1000).title,/missed some/);
 console.log('PASS: short camera preview distinguishes tracking patterns and is discarded before full calibration.');
+
+const threeWeakAreas=environment();
+threeWeakAreas.run(`state.mode='camera';state.calibrated=true;
+ validationRows=[[147,217],[68,151],[135,193],[79,142],[108,242]].map(([median,p90],i)=>({
+   point:i+1,target:{x:checks[i][0]*innerWidth,y:checks[i][1]*innerHeight},slots:60,freshSlots:54,
+   errors:[...Array(43).fill(median),...Array(11).fill(p90)]
+ }));finishValidation()`);
+assert.match(threeWeakAreas.get('#desk').innerHTML,/2 of 5 targets passed/);
+assert.match(threeWeakAreas.get('#desk').innerHTML,/Adjust the weak areas/);
+threeWeakAreas.get('#refine').onclick();
+assert.equal(threeWeakAreas.run('refinementPath.length'),3);
+assert.equal(threeWeakAreas.run('refinementPath.every(p=>!checks.some(c=>c[0]===p[0]&&c[1]===p[1]))'),true);
+assert.equal(threeWeakAreas.run('state.preChecks.length'),0);
+
+const filtered=environment();
+filtered.run("state.mode='camera';state.face={id:1,t:now()};ingest({x:100,y:100})");
+filtered.advance(45);filtered.run('state.face={id:2,t:now()};ingest({x:540,y:450})');
+filtered.advance(45);filtered.run('state.face={id:3,t:now()};ingest({x:110,y:110})');
+assert.equal(filtered.run('state.latest.x'),110,'A single spike is suppressed by the three-frame median');
+filtered.advance(45);filtered.run('state.face={id:4,t:now()};ingest({x:480,y:390})');
+filtered.advance(45);filtered.run('state.face={id:5,t:now()};ingest({x:490,y:400})');
+assert.equal(filtered.run('state.latest.x'),480,'A sustained change remains visible');
+assert.equal(filtered.run('state.latest.rawX'),490);
+filtered.run("beginValidation('pre')");
+assert.equal(filtered.run('state.latest'),null,'Each target starts with a fresh filter window');
+filtered.run('state.face={id:6,t:now()};ingest({x:60,y:80})');
+assert.equal(filtered.run('state.latest.x'),60);
+console.log('PASS: the two-pass, three-miss pattern gets targeted calibration, and brief spikes are filtered without carrying points across targets.');
