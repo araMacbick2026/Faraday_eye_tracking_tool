@@ -30,6 +30,26 @@ assert.equal(calibratedRidge.sampleCount,180);
 cal.run('beginRefinement()');assert.equal(cal.run('state.phase'),'validation');
 cal.run('beginCalibration()');assert.equal(calibratedRidge.sampleCount,0);assert.equal(calibratedRidge.predict({features:[.25,.3]}),null);
 console.log('PASS: centered regression retains the calibration and refinement, predicts a held-out point, and ignores ordinary clicks.');
+
+const { irisFeatures, createAdaptive } = cal.context.window.GazeModel;
+const landmarks = [];
+for (const [index, x, y] of [[33,0,0],[133,20,0],[159,10,-3],[145,10,3],[468,12,2],
+  [362,30,0],[263,50,0],[386,40,-3],[374,40,3],[473,42,2]]) landmarks[index]=[x,y];
+assert.deepEqual(Array.from(irisFeatures(landmarks)),[0.6,0.1,0.6,0.1]);
+const rotated = landmarks.map(([x,y])=>[100-2*y,60+2*x]);
+assert.deepEqual(Array.from(irisFeatures(rotated)),[0.6,0.1,0.6,0.1]);
+landmarks[145]=[10,-2.5];
+assert.equal(irisFeatures(landmarks),null,'Blinking frames are not usable');
+assert.equal(irisFeatures([]),undefined,'Older detectors can use the eye-patch model');
+const adaptive=createAdaptive(patches=>patches.pixels,135,9);
+for(const x of [0.1,0.5,0.9])for(const y of [0.18,0.5,0.82])for(let i=0;i<15;i++) {
+ assert.ok(adaptive.addData({pixels:[1,1],faradayIris:[x,y,x,y]},[x*1200,y*800],'faraday-calibration'));
+}
+assert.ok(adaptive.fit());assert.equal(adaptive.source,'iris');
+const irisEstimate=adaptive.predict({pixels:[1,1],faradayIris:[.25,.3,.25,.3]});
+assert.ok(Math.hypot(irisEstimate.x-300,irisEstimate.y-240)<15);
+assert.equal(adaptive.predict({pixels:[1,1],faradayIris:null}),null);
+console.log('PASS: iris calibration tracks a held-out point, rejects blinks, and is stable under camera rotation and scaling.');
 const r=success.context.window.Reliability;const good=()=>[1,2,3,4,5].map(point=>({point,slots:60,errors:Array(60).fill(20)}));
 assert.equal(r.summarize(good()).pass,true);let rows=good();rows[4].errors=Array(60).fill(400);assert.equal(r.summarize(rows).pass,false,'Bad corner fails despite low global median');rows=good();rows[0].errors=[20];assert.equal(r.summarize(rows).pass,false,'Sparse target fails');
 const v=environment();v.run("state.mode='pointer';beginValidation('pre')");for(let i=0;i<5;i++){for(let j=0;j<60;j++){v.advance(j===0?1000:50);v.run(`state.latest={x:activeValidation.target.x,y:activeValidation.target.y,t:now(),id:1};collectValidation()`);}v.advance(100);v.run('collectValidation()');}assert.equal(v.run('state.preChecks.length'),1);assert.equal(v.stats().training,0,'Validation must never train');

@@ -56,7 +56,7 @@ async function startCamera(){
     installFaceMonitor();
     const tracker=webgazer;
     tracker.addRegressionModule('faraday',function(){
-     return window.GazeModel.create(patches=>tracker.util.getEyeFeats(patches),calibrationCapacity);
+     return window.GazeModel.createAdaptive(patches=>tracker.util.getEyeFeats(patches),calibrationCapacity,calibration.length);
     });
     tracker.setRegression('faraday').setGazeListener(ingest);
     stage='camera permission and face-tracking initialization';button.textContent='Allow camera to continue…';$('#error').textContent='Allow camera access when your browser asks. It can take a few seconds to start.';
@@ -64,7 +64,7 @@ async function startCamera(){
     startup.then(()=>{if(epoch!==state.epoch)stopCamera();},()=>{});
     await withTimeout(startup,45000,stage);
     if(epoch!==state.epoch){stopCamera();return;}
-    webgazer.removeMouseEventListeners();webgazer.showPredictionPoints(false);webgazer.showVideoPreview(true);startMode('camera');
+    webgazer.removeMouseEventListeners();webgazer.showPredictionPoints(false);webgazer.showVideoPreview(true);document.getElementById('webgazerVideoContainer')?.setAttribute('aria-hidden','true');startMode('camera');
   }catch(error){
     if(epoch!==state.epoch)return;
     state.epoch++;stopCamera();
@@ -86,6 +86,15 @@ function ingest(data){
 }
 function installFaceMonitor(){
  const tracker=webgazer.getTracker();if(tracker.faradayWrapped)return;
+ if(typeof tracker.init==='function'){
+  const initialize=tracker.init;
+  let configured=false;
+  tracker.init=async function(){
+   const detector=await initialize.call(this);
+   if(!configured){detector?.faceMeshSolution?.setOptions({refineLandmarks:true});configured=true;}
+   return detector;
+  };
+ }
  const original=tracker.getEyePatches;tracker.faradayWrapped=true;
  let lastPresentedFrame;
  tracker.getEyePatches=async function(...args){
@@ -95,6 +104,8 @@ function installFaceMonitor(){
   if(epoch!==state.epoch)return null;
   const p=this.getPositions?.();const canvas=args[1];
   if(patches?.left&&patches?.right&&[1,33,263].every(i=>Number.isFinite(p?.[i]?.[0])&&Number.isFinite(p?.[i]?.[1]))&&canvas?.width&&canvas?.height){state.trackerError=null;
+   patches.faradayIris=window.GazeModel.irisFeatures(p);
+   if(patches.faradayIris===null){state.face=null;return null;}
    if(presentedFrame>0&&presentedFrame===lastPresentedFrame&&state.face)return patches;
    lastPresentedFrame=presentedFrame;
    const pose={x:p[1][0]/canvas.width,y:p[1][1]/canvas.height,scale:Math.hypot(p[33][0]-p[263][0],p[33][1]-p[263][1])/canvas.width};
@@ -163,7 +174,7 @@ function finishCalibration(){
   if(!model.fit()){
    showCalibrationIntro();message('We couldn’t set up tracking. Start the nine dots again.');return;
   }
-  state.calibrationModel={name:model.name,samples:model.sampleCount,heldOutMeanPx:model.calibrationError};
+  state.calibrationModel={name:model.name,source:model.source,samples:model.sampleCount,heldOutMeanPx:model.calibrationError};
  }
  state.calibrated=true;
  if(state.calibrationPoses.length)state.baseline=Object.fromEntries(['x','y','scale'].map(key=>[key,R.q(state.calibrationPoses.map(pose=>pose[key]),.5)]));
@@ -225,7 +236,7 @@ function finishValidation(){
  message(result.pass?'Accuracy check complete.':'The camera checks need to pass before you can read.');
 }
 function chooseStory(){state.story=R.choose(window.STORIES,state.story?.id);}
-function lesson(){const s=state.story;return `<div class="activity" id="activity"><div class="activity-inner"><article data-region="reading"><div class="eyebrow">${s.category} · ${s.id.toUpperCase()}</div><h2>${s.title}</h2>${s.paragraphs.map(p=>`<p>${p}</p>`).join('')}<p><b>Consider:</b> ${s.question}</p></article><div class="diagram" data-region="diagram"><span class="story-symbol" aria-hidden="true">${s.symbol}</span><div class="eyebrow">STORY THREAD</div>${s.diagram.map((p,i)=>`<p>${i?'↓<br>':''}${p}</p>`).join('')}</div></div><canvas id="heatmap" hidden></canvas></div>`;}
+function lesson(){const s=state.story;return `<div class="activity" id="activity"><div class="activity-inner"><article data-region="reading"><div class="eyebrow">${s.category} · ${s.id.toUpperCase()}</div><h2>${s.title}</h2>${s.paragraphs.map(p=>`<p>${p}</p>`).join('')}<p><b>Consider:</b> ${s.question}</p></article><div class="diagram" data-region="diagram"><span class="story-symbol" aria-hidden="true">${s.symbol}</span><div class="eyebrow">STORY THREAD</div>${s.diagram.map((p,i)=>`<p>${i?'↓<br>':''}${p}</p>`).join('')}</div></div><canvas id="heatmap" aria-hidden="true" hidden></canvas></div>`;}
 function showActivity(randomize=false){
  if(state.mode==='camera'&&(!state.calibrated||state.preChecks.length<2||state.invalidated)){showCalibrationIntro();return;}
  if(randomize||!state.story)chooseStory();phase('ready',4);

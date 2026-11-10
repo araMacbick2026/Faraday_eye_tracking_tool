@@ -57,7 +57,7 @@
     };
   }
 
-  function create(extract, capacity) {
+  function create(extract, capacity, minimumTargets = 6) {
     let groups, predict, count, featureCount, calibrationError;
     const readFeatures = patches => {
       try { return extract(patches) ?? []; } catch { return []; }
@@ -84,7 +84,7 @@
         const targets = [...groups.values()].map(({ point, samples }) => ({
           point, features: samples[0].map((_, i) => median(samples.map(sample => sample[i])))
         }));
-        if (targets.length < 6) return false;
+        if (targets.length < minimumTargets) return false;
         // Tune only on calibration targets. The separate accuracy checks never feed the model.
         const candidates = [0.01, 0.1, 1];
         let bestStrength = candidates[0], bestLoss = Infinity;
@@ -111,5 +111,57 @@
     return model;
   }
 
-  root.GazeModel = { create };
+  function irisFeatures(landmarks) {
+    if (!landmarks?.[473]) return undefined;
+    const features = [];
+    // The iris center is measured in the eye's own coordinate system, using its corners as anchors.
+    for (const [left, right, top, bottom, center] of [[33, 133, 159, 145, 468], [362, 263, 386, 374, 473]]) {
+      const points = [left, right, top, bottom, center].map(index => landmarks[index]);
+      if (points.some(point => !point || !Number.isFinite(point[0]) || !Number.isFinite(point[1]))) return null;
+      const [a, b, upper, lower, iris] = points;
+      const dx = b[0] - a[0], dy = b[1] - a[1], lengthSquared = dx * dx + dy * dy;
+      if (lengthSquared < 64) return null;
+      const vertical = (x, y) => (dx * y - dy * x) / lengthSquared;
+      const opening = vertical(lower[0] - upper[0], lower[1] - upper[1]);
+      if (Math.abs(opening) < 0.08) return null;
+      const x = iris[0] - a[0], y = iris[1] - a[1];
+      features.push((x * dx + y * dy) / lengthSquared, vertical(x, y));
+    }
+    return features;
+  }
+
+  function createAdaptive(extractPatches, capacity, targetCount) {
+    const patchesModel = create(extractPatches, capacity, targetCount);
+    const irisModel = create(patches => patches.faradayIris, capacity, targetCount);
+    let active = null;
+    return {
+      name: 'faraday-adaptive-ridge',
+      get source() { return active === irisModel ? 'iris' : 'eye-patches'; },
+      get sampleCount() { return active?.sampleCount ?? patchesModel.sampleCount; },
+      get calibrationError() { return active?.calibrationError ?? null; },
+      init() { patchesModel.init(); irisModel.init(); active = null; },
+      getData() { return []; },
+      setData() {},
+      addData(patches, point, type) {
+        if (!patches || patches.faradayIris === null) return false;
+        const pixelAccepted = patchesModel.addData(patches, point, type);
+        const irisAccepted = irisModel.addData(patches, point, type);
+        return pixelAccepted || irisAccepted;
+      },
+      fit() {
+        const pixelsReady = patchesModel.fit();
+        const irisReady = irisModel.fit();
+        // Prefer iris geometry if held-out calibration targets score comparably. Neither model sees accuracy-check targets.
+        active = irisReady && (!pixelsReady || irisModel.calibrationError <= patchesModel.calibrationError * 1.1)
+          ? irisModel : pixelsReady ? patchesModel : null;
+        return active !== null;
+      },
+      predict(patches) {
+        if (!patches || patches.faradayIris === null) return null;
+        return active?.predict(patches) ?? null;
+      }
+    };
+  }
+
+  root.GazeModel = { create, createAdaptive, irisFeatures };
 })(typeof window === 'undefined' ? globalThis : window);
