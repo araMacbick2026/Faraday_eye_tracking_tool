@@ -39,7 +39,7 @@ const rec=environment();rec.run("state.mode='camera';state.face={x:.5,y:.5,scale
 const lost=environment();lost.run("state.mode='camera';state.running=true;state.phase='recording';state.latest=null;state.face=null;lastTick=now()");lost.advance(100);lost.run('tick(now())');lost.advance(1100);lost.run('tick(now())');assert.equal(lost.run('state.running'),false,'Signal loss pauses');
 const moved=environment();moved.run("state.mode='camera';state.running=true;state.phase='recording';state.baseline={x:.5,y:.5,scale:.2};state.face={x:.7,y:.5,scale:.2,t:now()};lastTick=now()");moved.advance(50);moved.run('tick(now())');assert.equal(moved.run('state.invalidated'),false);moved.advance(1100);moved.run('tick(now())');assert.equal(moved.run('state.invalidated'),true);assert.equal(moved.run('state.running'),false);
 const blocked=environment();blocked.run("state.mode='camera';state.preChecks=[];showActivity(true)");assert.equal(blocked.run('state.phase'),'calibration','Failed prechecks block recording');
-const review=environment();review.run("state.mode='camera';chooseStory();state.samples=[];state.activityRect={width:600,height:440};renderReview()");assert.equal(review.get('#heatmap').hidden,true);assert.match(review.get('#desk').innerHTML,/NOT SUITABLE/);assert.equal(review.run('sessionReport().schema'),'faraday.observatory.v3');
+const review=environment();review.run("state.mode='camera';chooseStory();state.samples=[];state.activityRect={width:600,height:440};renderReview()");assert.equal(review.get('#heatmap').hidden,true);assert.match(review.get('#desk').innerHTML,/Tracking couldn’t be verified/);assert.equal(review.run('sessionReport().schema'),'faraday.observatory.v3');
 const stories=success.context.window.STORIES;assert.equal(stories.length,6);assert.equal(new Set(stories.map(s=>s.id)).size,6);for(const s of stories){assert.notEqual(r.choose(stories,s.id,()=>0).id,s.id);assert.ok(s.paragraphs.length===3&&s.question&&s.diagram.length===3);}
 const css=fs.readFileSync('dist/style.css','utf8');assert.ok(+css.match(/#overlay\{[^}]*z-index:(\d+)/)[1]>+css.match(/#webgazerVideoContainer\{[^}]*z-index:(\d+)/)[1]);
 console.log('PASS: camera recovery; 9-point/135-sample gated calibration; independent validation; per-target quality gates; drift/coverage rules; unique/stale/gap accounting; signal/movement pauses; recording block; failed heatmap hidden; exports; 6 randomized stories; overlay ordering.');
@@ -59,7 +59,7 @@ console.log('PASS: two consecutive checks, failed-check reset, JSON/CSV serializ
 const integrated = environment();
 integrated.context.location.pathname = '/pilot/studio';
 let summaryRequest;
-integrated.get('#regions').insertAdjacentHTML = (_, html) => assert.match(html, /Save summary to athlete dashboard/);
+integrated.get('#regions').insertAdjacentHTML = (_, html) => assert.match(html, /Save to dashboard/);
 integrated.context.fetch = async (url, options) => {
   assert.equal(url, '/pilot/api/observations');
   assert.equal(options.method, 'POST');
@@ -75,7 +75,7 @@ assert.match(integrated.get('#observationStatus').textContent, /Saved/);
 console.log('PASS: studio saves only the observation summary to the athlete dashboard.');
 
 const stall=environment();stall.run("state.mode='camera';beginCalibration();clickCalibration();calSamples=11;state.face={x:.5,y:.5,scale:.2,t:now(),id:11};state.stableSince=0;calLastFrame=11");
-stall.advance(1000);stall.run('collectCalibration()');assert.match(stall.get('#targetProgress').textContent,/No fresh eye frames/);assert.equal(stall.run('calSamples'),11);
+stall.advance(1000);stall.run('collectCalibration()');assert.match(stall.get('#targetProgress').textContent,/Face the camera/);assert.equal(stall.run('calSamples'),11);
 stall.advance(15000);stall.run('collectCalibration()');assert.equal(stall.run('collecting'),false);assert.match(stall.get('#targetProgress').textContent,/Collection stopped/);assert.equal(stall.get('#calibrationControls').hidden,false);
 stall.get('#restartCalibration').onclick();assert.equal(stall.run('calSamples'),0);assert.equal(stall.run('calIndex'),0);assert.equal(stall.run('state.calibrated'),false);
 const resume=environment();resume.run("state.mode='camera';beginCalibration();clickCalibration();calSamples=11");resume.advance(1000);resume.run('collectCalibration()');assert.equal(resume.run('calSamples'),11);resume.run('state.face={x:.5,y:.5,scale:.2,t:now(),id:12};state.stableSince=0;collectCalibration()');assert.equal(resume.run('calSamples'),12);
@@ -102,7 +102,7 @@ assert.equal(r.positionChanged({x:.4,y:.5,scale:.2},{x:.46,y:.5,scale:.2}),false
 console.log('PASS: all 9 webcam calibration targets accept changed stable poses; within-target movement settles/resumes without full restart; sustained large recording movement still invalidates.');
 
 const slow=r.summarize([1,2,3,4,5].map(point=>({point,slots:60,freshSlots:60,errors:Array(30).fill(40)})));assert.equal(slow.pass,true);assert.equal(slow.coverage,1);assert.equal(slow.targets[0].predictionsPerSecond,10);
-const sparse=r.summarize([{point:1,slots:60,freshSlots:60,errors:[20]}]);assert.equal(sparse.pass,false,'Availability cannot substitute for independent accuracy measurements');assert.match(r.diagnose(sparse).join(' '),/Too few/);
+const sparse=r.summarize([{point:1,slots:60,freshSlots:60,errors:[20]}]);assert.equal(sparse.pass,false,'Availability cannot substitute for independent accuracy measurements');assert.match(r.diagnose(sparse).join(' '),/too few readings/);
 const duplicate=environment();duplicate.run("state.mode='camera';state.face={x:.5,y:.5,scale:.2,t:now(),id:1};state.stableSince=0;state.latest={x:100,y:100,t:now(),id:5};addRecordingSlot(50);addRecordingSlot(100)");assert.equal(duplicate.run('coverage()'),1);assert.equal(duplicate.run('state.samples.filter(s=>s.valid).length'),1);assert.equal(duplicate.run('state.samples[1].available'),true);
 const refine=environment();refine.run("state.mode='camera';state.validation={targets:[{point:1,pass:false,median:350,target:{x:300,y:240}}]};state.calibrationLog=[{point:1,samples:15}];beginRefinement()");assert.equal(refine.run('calibrationPath.length'),3);assert.equal(refine.run('refining'),true);assert.equal(refine.run('state.preChecks.length'),0);
 for(let point=0;point<3;point++){refine.run('clickCalibration()');refine.advance(800);for(let frame=0;frame<15;frame++){refine.advance(140);refine.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${point*15+frame+1}};state.stableSince=0;collectCalibration()`);}}
@@ -111,13 +111,13 @@ assert.equal(new Set(r.refinementPoints({x:.25,y:.3},[[.1,.18],[.5,.18],[.9,.18]
 console.log('PASS: 10 Hz tracker with fresh signal is not falsely marked missing; minimum unique-count gate retained; repeated data never adds heatmap points; 3-point refinement and mandatory independent revalidation.');
 
 const offsets=r.summarize([{point:1,slots:60,freshSlots:60,errors:Array(30).fill(50),offsets:[{x:-30,y:40},{x:-20,y:30},{x:-40,y:50}]}]);assert.equal(offsets.targets[0].offsetX,-30);assert.equal(offsets.targets[0].offsetY,40);
-const diag=environment();diag.run("state.mode='pointer';state.viewport={width:1200,height:800};validationRows=[{point:1,target:{x:300,y:240},slots:60,freshSlots:60,errors:Array(30).fill(350),offsets:Array(30).fill({x:350,y:0})}];finishValidation()");assert.match(diag.get('#desk').innerHTML,/Refine weak area/);assert.match(diag.get('#desk').innerHTML,/Download diagnostics/);assert.match(diag.get('#desk').innerHTML,/Accuracy map/);assert.equal(typeof diag.get('#retryCheck').onclick,'function');diag.get('#retryCheck').onclick();assert.equal(diag.run('state.phase'),'validation');
+const diag=environment();diag.run("state.mode='pointer';state.viewport={width:1200,height:800};validationRows=[{point:1,target:{x:300,y:240},slots:60,freshSlots:60,errors:Array(30).fill(350),offsets:Array(30).fill({x:350,y:0})}];finishValidation()");assert.match(diag.get('#desk').innerHTML,/Adjust the weak area/);assert.match(diag.get('#desk').innerHTML,/Download check results/);assert.match(diag.get('#desk').innerHTML,/Accuracy map/);assert.equal(typeof diag.get('#retryCheck').onclick,'function');diag.get('#retryCheck').onclick();assert.equal(diag.run('state.phase'),'validation');
 console.log('PASS: signed offset summaries, target-map rendering, failed-check recovery and diagnostic controls.');
 
 const widespread=environment();
 widespread.run("state.mode='camera';state.calibrationLog=[{point:1,samples:15}];validationRows=[194,213,237,252,307].map((error,i)=>({point:i+1,slots:60,freshSlots:48,errors:Array(48).fill(error)}));finishValidation()");
 assert.match(widespread.get('#desk').innerHTML,/5 of 5 targets missed/);
-assert.doesNotMatch(widespread.get('#desk').innerHTML,/Refine weak area|Repeat accuracy check/);
+assert.doesNotMatch(widespread.get('#desk').innerHTML,/Adjust the weak area|Check again/);
 assert.equal(widespread.run('state.validation.pass'),false);
 widespread.get('#demoContinue').onclick();
 assert.equal(widespread.run('state.mode'),'pointer');

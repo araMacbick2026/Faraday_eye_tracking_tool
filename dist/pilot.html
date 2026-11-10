@@ -4,15 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Faraday | Athlete Pilot</title>
-  <link rel="stylesheet" href="/style.css?v=12">
-  <script type="module" src="/pilot.js?v=23"></script>
+  <link rel="stylesheet" href="/style.css?v=13">
+  <script type="module" src="/pilot.js?v=24"></script>
 </head>
 <body class="pilot">
   <main class="pilot-main">
-    <header class="pilot-header"><a href="/pilot/">Faraday</a><span>ATHLETE PERFORMANCE</span></header>
-    <p class="eyebrow">ATHLETE PILOT · FICTIONAL HOCKEY ROSTER</p>
-    <h1 id="pilot-title">Athlete progress</h1>
-    <p id="pilot-intro">Explore Faraday with one sample athlete.</p>
+    <header class="pilot-header"><a class="pilot-wordmark" href="/pilot/"><span aria-hidden="true">f.</span> Faraday</a><span id="pilot-header-note">Athlete development</span><button id="pilot-logout" type="button" hidden>Sign out</button></header>
+    <div class="pilot-page-title">
+      <p class="eyebrow" id="pilot-view-label">Faraday hockey demo</p>
+      <h1 id="pilot-title">Athlete progress</h1>
+      <p id="pilot-intro">Explore a sample athlete’s progress in practice and at school.</p>
+    </div>
     <p id="pilot-status" role="status"></p>
     <div id="pilot-welcome" class="pilot-welcome">
       <form id="pilot-login" class="pilot-card pilot-form">
@@ -23,7 +25,7 @@
         <button type="submit" disabled>Open dashboard</button>
       </form>
       <div class="pilot-welcome-guide">
-        <h2>Choose what you want to try</h2>
+        <h2>Three views of the same progress</h2>
         <dl>
           <dt>Coach</dt><dd>Record a measurement, practice result, learning check, or school update.</dd>
           <dt>Athlete</dt><dd>View your performance, reflect on practice, or record a nutrition check-in.</dd>
@@ -36,7 +38,6 @@
       <div class="pilot-toolbar">
         <label>Week of <input id="pilot-week" type="date" aria-describedby="pilot-period"></label>
         <p id="pilot-period"></p>
-        <button id="pilot-logout" type="button">Sign out</button>
       </div>
       <nav class="pilot-report-nav" aria-label="Athlete dashboard sections">
         <button type="button" data-panel="report" aria-pressed="true">Performance report</button>
@@ -46,16 +47,16 @@
       </nav>
       <section id="pilot-report" aria-labelledby="pilot-report-title">
         <div class="pilot-report-heading">
-          <div><p class="eyebrow">TESTING HISTORY</p><h2 id="pilot-report-title">Performance report card</h2>
-          <p>Latest results and change through the selected week.</p></div>
-          <button id="pilot-add-measurement" type="button" hidden>+ Record measurement</button>
+          <div><p class="eyebrow">Sports</p><h2 id="pilot-report-title">Performance report card</h2>
+          <p>See the latest test results and how they’ve changed.</p></div>
+          <button id="pilot-add-measurement" type="button" hidden>Record a test result</button>
         </div>
         <div id="pilot-categories" class="pilot-actions" aria-label="Metric categories"></div>
         <div id="pilot-metrics" class="pilot-grid" aria-live="polite"></div>
         <section id="pilot-metric-detail" class="pilot-card" aria-label="Selected metric history" hidden></section>
         <details id="pilot-comparison" class="pilot-card pilot-history" hidden>
-          <summary>Compare with a fictional reference group</summary>
-          <p class="pilot-detail">Illustrative values for the demo. Differences use the original units. Lower times mean faster results.</p>
+          <summary>Compare with a sample group</summary>
+          <p class="pilot-detail">These group results are made up for the demo. For timed tests, a lower result is faster.</p>
           <div class="pilot-table-wrap"><table><thead><tr><th scope="col">Metric</th><th scope="col">Athlete</th><th scope="col">Demo reference</th><th scope="col">Difference</th></tr></thead><tbody id="pilot-comparison-rows"></tbody></table></div>
         </details>
       </section>
@@ -69,36 +70,42 @@
         </details>
       </section>
       <section id="pilot-eye-tracking" aria-labelledby="pilot-eye-title" hidden>
-        <div class="pilot-report-heading">
-          <div><p class="eyebrow">LEARNING OBSERVATORY</p><h2 id="pilot-eye-title">Eye tracking</h2>
-          <p>Run a guided reading activity and review the session here.</p></div>
-          <button id="pilot-open-studio" type="button" aria-controls="pilot-studio" aria-expanded="false">Start an activity →</button>
+        <div class="pilot-reading-intro">
+          <div><p class="eyebrow">Learning observatory</p><h2 id="pilot-eye-title">Eye tracking</h2>
+          <p>Follow a few dots, read a short story, then see where the webcam estimated you were looking.</p>
+          <button id="pilot-open-studio" type="button" aria-controls="pilot-studio" aria-expanded="false">Start an activity <span aria-hidden="true">→</span></button>
+          <p class="pilot-reading-note">About 5 minutes · Desktop recommended</p></div>
+          <ol class="pilot-reading-outline" aria-label="What to expect">
+            <li><b>Set up</b><span>Use a webcam or practise with your pointer.</span></li>
+            <li><b>Read</b><span>Choose a short story.</span></li>
+            <li><b>Review</b><span>See the results and share a summary.</span></li>
+          </ol>
         </div>
         <p id="pilot-studio-status" role="status"></p>
         <section id="pilot-studio" class="pilot-studio" aria-labelledby="pilot-studio-title" tabindex="-1" hidden>
-          <div class="pilot-studio-header"><h3 id="pilot-studio-title">Observation desk</h3><button id="pilot-close-studio" type="button" class="secondary">Close activity</button></div>
+          <div class="pilot-studio-header"><h3 id="pilot-studio-title">Reading activity</h3><button id="pilot-close-studio" type="button" class="secondary">Close activity</button></div>
           <div class="steps" aria-label="Activity steps"><span>01 <b>Set up</b></span><span>02 <b>Calibrate</b></span><span>03 <b>Check accuracy</b></span><span>04 <b>Read</b></span><span>05 <b>Review</b></span></div>
           <div class="workspace">
-            <div class="primary"><div class="panel-label"><span>GUIDED READING SESSION</span><span id="modeBadge">NO SESSION</span></div><div id="desk"></div></div>
+            <div class="primary"><div class="panel-label"><span id="modeBadge">Choose a way to start</span></div><div id="desk"></div></div>
             <div class="rail">
-              <div class="eyebrow">LIVE SESSION</div>
-              <div class="readout"><span>Input</span><b id="source">Not connected</b></div>
+              <div class="eyebrow">Your session</div>
+              <div class="readout"><span>Mode</span><b id="source">Not connected</b></div>
               <div class="readout"><span>Calibration</span><b id="calStatus">Not started</b></div>
-              <div class="readout"><span>Median error</span><b id="accuracy">—</b></div>
-              <div class="readout"><span>Samples</span><b id="sampleCount">0</b></div>
-              <div id="signal" class="signal">Waiting for a session</div>
+              <div class="readout" hidden><span>Typical distance from target</span><b id="accuracy">—</b></div>
+              <div class="readout" hidden><span>Readings</span><b id="sampleCount">0</b></div>
+              <div id="signal" class="signal" role="status">Ready when you are.</div>
             </div>
           </div>
           <div id="overlay" hidden><div class="overlay-top"><span id="targetInstruction"></span><button id="cancelTarget" type="button">Cancel</button></div><div id="targetProgress"></div><button id="target" type="button" aria-label="Calibration target">+</button></div>
           <div id="gazeDot" hidden></div>
         </section>
         <article id="pilot-observation-card" class="pilot-card" tabindex="-1" aria-labelledby="pilot-saved-title">
-          <p class="eyebrow">SHARED WITH COACH AND ATHLETE</p>
-          <h3 id="pilot-saved-title">Latest saved observation</h3>
+          <p class="eyebrow">Visible to coach and athlete</p>
+          <h3 id="pilot-saved-title">Last saved activity</h3>
           <div id="pilot-observation-summary"></div>
-          <p class="pilot-detail">The heatmap and raw exports are available in the activity review before you close it.</p>
+          <p class="pilot-detail">To keep the full results, download them before closing the activity.</p>
         </article>
-        <p class="pilot-detail">Exploratory adult testing. Gaze estimates do not measure attention, comprehension, or athletic performance.</p>
+        <p class="pilot-detail">For adult testing. The webcam estimates where you looked. It cannot tell what you understood.</p>
       </section>
       <section id="pilot-actions" hidden aria-labelledby="pilot-action-title">
         <h2 id="pilot-action-title">Add an update</h2>

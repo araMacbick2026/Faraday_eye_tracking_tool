@@ -7,12 +7,12 @@
  function diagnose(v){
   const messages=[];
   if(v.complete===false)messages.push('This check did not cover all five targets. Run a complete accuracy check.');
-  if(v.targets.some(t=>t.coverage<limits.coverage))messages.push('Fresh signal is missing too often. Keep your face visible and close other camera or heavy browser apps.');
-  if(v.targets.some(t=>t.errors.length<limits.minSamples))messages.push('Too few independent predictions. Recheck after closing other tabs; capture rate is reported separately from signal coverage.');
+  if(v.targets.some(t=>t.coverage<limits.coverage))messages.push('The camera lost sight of your eyes too often. Keep your face in view and try again.');
+  if(v.targets.some(t=>t.errors.length<limits.minSamples))messages.push('There were too few readings. Close other apps that use the camera, then check again.');
   const bad=positionFailures(v);
-  if(widespreadPositionError(v))messages.push(`${bad.length} of ${v.targets.length} targets missed the position limits. Centre the webcam, use even lighting from the front, and keep your position steady while recalibrating all nine points. If the next run still fails, download the diagnostics or try the story with pointer rehearsal.`);
-  else if(bad.length)messages.push('Position error is high at target'+(bad.length>1?'s ':' ')+bad.map(t=>t.point).join(', ')+'. Refine the nearby calibration area, then run a new independent check.');
-  if(!messages.length)messages.push('All target criteria passed. Confirm with the next independent check.');
+  if(widespreadPositionError(v))messages.push(`${bad.length} of ${v.targets.length} targets missed the mark. Centre your camera and light your face from the front, then start the nine dots again.`);
+  else if(bad.length)messages.push('Tracking was off at dot'+(bad.length>1?'s ':' ')+bad.map(t=>t.point).join(', ')+'. Adjust that part of the screen and try another check.');
+  if(!messages.length)messages.push('All dots passed. Run the next check to make sure tracking stays accurate.');
   return messages;
  }
  function refinementPoints(target,points){return points.map((p,i)=>({i,d:Math.hypot(p[0]-target.x,p[1]-target.y)})).sort((a,b)=>a.d-b.d).slice(0,3).map(p=>p.i);}

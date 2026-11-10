@@ -12,6 +12,9 @@ const dashboard = document.querySelector('#pilot-dashboard');
 const status = document.querySelector('#pilot-status');
 const week = document.querySelector('#pilot-week');
 const period = document.querySelector('#pilot-period');
+const toolbar = document.querySelector('.pilot-toolbar');
+const logout = document.querySelector('#pilot-logout');
+const headerNote = document.querySelector('#pilot-header-note');
 const summary = document.querySelector('#pilot-summary');
 const forms = document.querySelector('#pilot-forms');
 const actions = document.querySelector('#pilot-actions');
@@ -100,8 +103,7 @@ function selectAction(type) {
 function selectPanel(panel) {
   if (panel !== 'observation') closeStudio();
   selectedPanel = panel;
-  week.closest('label').hidden = panel === 'observation';
-  period.hidden = panel === 'observation';
+  toolbar.hidden = panel === 'observation';
   for (const [key, section] of Object.entries(panels)) section.hidden = key !== panel;
   for (const button of reportNav.querySelectorAll('button')) {
     button.setAttribute('aria-pressed', String(button.dataset.panel === panel));
@@ -129,21 +131,21 @@ function setMeasurementUnit() {
 
 function renderObservation(observation) {
   if (!observation) {
-    observationSummary.textContent = 'No observation saved yet. Finish an activity and choose Save summary in the studio.';
+    observationSummary.textContent = 'After a reading activity, choose Save to dashboard to see the summary here.';
     return;
   }
   const quality = {
-    'rehearsal-not-gaze': 'Pointer rehearsal only',
-    'provisional-broad-region-only': 'Webcam · provisional broad-region estimates',
-    'not-suitable-for-interpretation': 'Webcam quality check incomplete or failed'
+    'rehearsal-not-gaze': 'Pointer practice',
+    'provisional-broad-region-only': 'Camera checks passed',
+    'not-suitable-for-interpretation': 'Camera results unverified'
   };
   const pixels = value => value === null ? 'Not checked' : value + ' px';
   const results = {
     'Active time': (observation.durationMs / 1000).toFixed(1) + ' s',
-    'Fresh signal coverage': observation.coverage + '%',
-    'Unique predictions': observation.predictions,
-    'Median error before': pixels(observation.beforePx),
-    'Median error after': pixels(observation.afterPx),
+    'Time tracked': observation.coverage + '%',
+    'Readings': observation.predictions,
+    'Typical distance before reading': pixels(observation.beforePx),
+    'Typical distance after reading': pixels(observation.afterPx),
     'Pauses': observation.pauses
   };
   observationSummary.innerHTML = '<p class="pilot-observation-story"><strong>' + escape(observation.story) + '</strong> ' +
@@ -156,7 +158,8 @@ function renderObservation(observation) {
 
 function render(data) {
   const { role, athlete, history, weekly, weekStart, weekEnd } = data;
-  title.textContent = athlete.name + ' · ' + (role === 'parent' ? 'Parent dashboard' : roleLabels[role] + ' view');
+  title.textContent = athlete.name;
+  document.querySelector('#pilot-view-label').textContent = role === 'parent' ? 'Parent dashboard' : roleLabels[role] + ' dashboard';
   document.querySelector('#pilot-intro').textContent = [athlete.team, athlete.position, athlete.season].filter(Boolean).join(' · ');
   period.textContent = dateLabel(weekStart) + ' to ' + dateLabel(weekEnd);
   week.value = weekStart;
@@ -219,6 +222,8 @@ function render(data) {
   selectAction(types.includes(selectedAction) ? selectedAction : types[0]);
   welcome.hidden = true;
   dashboard.hidden = false;
+  logout.hidden = false;
+  headerNote.hidden = true;
 }
 
 async function load(date) {
@@ -232,13 +237,16 @@ async function load(date) {
       closeStudio();
       dashboard.hidden = true;
       welcome.hidden = false;
+      logout.hidden = true;
+      headerNote.hidden = false;
       summary.replaceChildren();
       observationSummary.replaceChildren();
       clearReport();
       forms.replaceChildren();
       document.querySelector('#pilot-history').replaceChildren();
       title.textContent = 'Athlete progress';
-      document.querySelector('#pilot-intro').textContent = 'Explore Faraday with one sample athlete.';
+      document.querySelector('#pilot-view-label').textContent = 'Faraday hockey demo';
+      document.querySelector('#pilot-intro').textContent = 'Explore a sample athlete’s progress in practice and at school.';
     }
     if (error.status !== 401) status.textContent = error.message;
   }
@@ -276,8 +284,8 @@ openStudio.addEventListener('click', async () => {
   openStudio.setAttribute('aria-expanded', 'true');
   studioStatus.textContent = 'Loading the observation desk…';
   try {
-    studioLoad ??= Promise.all([import('/reliability.js?v=9'), import('/stories.js?v=7'), import('/gaze-model.js?v=1')])
-      .then(() => import('/app.js?v=12'));
+    studioLoad ??= Promise.all([import('/reliability.js?v=10'), import('/stories.js?v=7'), import('/gaze-model.js?v=1')])
+      .then(() => import('/app.js?v=13'));
     await studioLoad;
     if (!studio.hidden) {
       studioStatus.textContent = '';
@@ -334,7 +342,7 @@ forms.addEventListener('submit', async event => {
   }
 });
 
-document.querySelector('#pilot-logout').addEventListener('click', async () => {
+logout.addEventListener('click', async () => {
   try {
     await api('logout', {});
     closeStudio();

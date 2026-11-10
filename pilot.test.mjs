@@ -26,7 +26,7 @@ const post = (body, cookie) => ({
 test('pilot is closed until distinct role codes are configured', async () => {
   const app = await start({});
   try {
-    assert.match(await (await app.request('/pilot/')).text(), /Fictional hockey roster/i);
+    assert.match(await (await app.request('/pilot/')).text(), /Faraday hockey demo/i);
     assert.equal((await app.request('/pilot/api/progress')).status, 503);
   } finally { await app.close(); }
 });
