@@ -4,7 +4,10 @@ function environment({media=true,policy=true,error=null}={}){
  let time=1000,stopped=0,began=0,training=0;const elements=new Map(),events={};
  const el=()=>({textContent:'',disabled:false,hidden:true,style:{},classList:{toggle(){}},remove(){},appendChild(child){elements.set('#'+child.id,child)},scrollIntoView(){},getBoundingClientRect(){return{x:0,y:0,width:600,height:440}},getContext(){return{createRadialGradient(){return{addColorStop(){}}},fillRect(){}}}});
  const get=s=>{if(!elements.has(s))elements.set(s,el());return elements.get(s)};
- const tracker={params:{},getTracker(){return{getEyePatches:async()=>false}},clearData(){},recordScreenPosition(){training++},saveDataAcrossSessions(){return this},async setCameraConstraints(c){this.constraints=c},setRegression(){return this},setGazeListener(){return this},async begin(){began++;if(error)throw error;return this},end(){throw new Error('partial start')},removeMouseEventListeners(){},showPredictionPoints(){},showVideoPreview(){}};
+ const clickWindows=['screenXClicksArray','screenYClicksArray','eyeFeaturesClicks','dataClicks'];
+ const ridge={init(){for(const key of clickWindows)this[key]={windowSize:50,data:[]};}};
+ ridge.init();
+ const tracker={params:{},getTracker(){return{getEyePatches:async()=>false}},getRegression(){return [ridge]},clearData(){ridge.init()},recordScreenPosition(x,y){training++;for(const key of clickWindows){const w=ridge[key];w.data.push([x,y]);if(w.data.length>w.windowSize)w.data.shift();}},saveDataAcrossSessions(){return this},async setCameraConstraints(c){this.constraints=c},setRegression(){return this},setGazeListener(){return this},async begin(){began++;if(error)throw error;return this},end(){throw new Error('partial start')},removeMouseEventListeners(){},showPredictionPoints(){},showVideoPreview(){}};
  const window={webgazer:tracker,isSecureContext:true,addEventListener:(n,f)=>events[n]=f};
  const context={window,document:{baseURI:'https://example.test/',permissionsPolicy:{allowsFeature:()=>policy},querySelector:get,querySelectorAll:()=>[],createElement:()=>el(),getElementById:id=>id==='webgazerVideoFeed'?{srcObject:{getTracks:()=>[{stop(){stopped++}}]}}:(elements.get('#'+id)||null),addEventListener:(n,f)=>events[n]=f,head:{append(){}}},performance:{now:()=>time},URL,console:{warn(){}},setTimeout,clearTimeout,setInterval(){},requestAnimationFrame(){},navigator:{mediaDevices:media?{getUserMedia(){}}:undefined},location:{reload(){}},innerWidth:1200,innerHeight:800,devicePixelRatio:1};
  Object.defineProperty(context,'webgazer',{get:()=>window.webgazer});vm.createContext(context);vm.runInContext(code,context);
@@ -13,9 +16,19 @@ function environment({media=true,policy=true,error=null}={}){
 for(const [name,expected] of [['NotAllowedError','blocked'],['NotFoundError','No camera'],['NotReadableError','could not be opened'],['OverconstrainedError','settings'],['TimeoutError','too long']]){const e=environment({error:Object.assign(new Error(name),{name})});await e.run('startCamera()');assert.match(e.get('#error').textContent,new RegExp(expected));assert.equal(e.get('#camera').disabled,false);assert.equal(e.stats().stopped,1);}
 for(const config of [{media:false},{policy:false}]){const e=environment(config);await e.run('startCamera()');assert.equal(e.stats().began,0);}
 const success=environment();await success.run('startCamera()');assert.equal(success.tracker.params.faceMeshSolutionPath,'https://example.test/mediapipe/face_mesh/');assert.equal(success.run('state.mode'),'camera');
-const cal=environment();cal.run("state.mode='camera';beginCalibration();clickCalibration()");cal.advance(1000);cal.run('collectCalibration()');assert.equal(cal.stats().training,0,'No training without face');
+const cal=environment();await cal.run('startCamera()');cal.run('beginCalibration();clickCalibration()');cal.advance(1000);cal.run('collectCalibration()');assert.equal(cal.stats().training,0,'No training without face');
 for(let point=0;point<9;point++){if(point)cal.run('clickCalibration()');cal.advance(800);for(let i=0;i<15;i++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${point*15+i+1}};state.stableSince=0;collectCalibration()`);}}
 assert.equal(cal.run('state.calibrated'),true);assert.equal(cal.stats().training,135);assert.equal(cal.run('state.calibrationLog.length'),9);
+const calibratedRidge=cal.tracker.getRegression()[0];
+assert.equal(calibratedRidge.eyeFeaturesClicks.data.length,135);
+assert.deepEqual(calibratedRidge.dataClicks.data[0],[120,144]);
+cal.run("state.validation={targets:[{point:1,pass:false,median:350,target:{x:300,y:240}}]};beginRefinement()");
+for(let point=0;point<3;point++){cal.run('clickCalibration()');cal.advance(800);for(let frame=0;frame<15;frame++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${136+point*15+frame}};state.stableSince=0;collectCalibration()`);}}
+assert.equal(calibratedRidge.eyeFeaturesClicks.data.length,180);
+assert.deepEqual(calibratedRidge.dataClicks.data[0],[120,144]);
+cal.run('beginRefinement()');assert.equal(cal.run('state.phase'),'validation');
+cal.run('beginCalibration()');assert.equal(calibratedRidge.dataClicks.data.length,0);assert.equal(calibratedRidge.dataClicks.windowSize,180);
+console.log('PASS: ridge retains the full nine-point calibration and one refinement, including the first target.');
 const r=success.context.window.Reliability;const good=()=>[1,2,3,4,5].map(point=>({point,slots:60,errors:Array(60).fill(20)}));
 assert.equal(r.summarize(good()).pass,true);let rows=good();rows[4].errors=Array(60).fill(400);assert.equal(r.summarize(rows).pass,false,'Bad corner fails despite low global median');rows=good();rows[0].errors=[20];assert.equal(r.summarize(rows).pass,false,'Sparse target fails');
 const v=environment();v.run("state.mode='pointer';beginValidation('pre')");for(let i=0;i<5;i++){for(let j=0;j<60;j++){v.advance(j===0?1000:50);v.run(`state.latest={x:activeValidation.target.x,y:activeValidation.target.y,t:now(),id:1};collectValidation()`);}v.advance(100);v.run('collectValidation()');}assert.equal(v.run('state.preChecks.length'),1);assert.equal(v.stats().training,0,'Validation must never train');

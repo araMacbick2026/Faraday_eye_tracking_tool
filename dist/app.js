@@ -5,6 +5,8 @@ const state={mode:null,phase:'setup',latest:null,calibrated:false,validation:nul
 let targetTimer,validationRows=[],activeValidation=null,calIndex=0,calClicks=0,lastSample=0,lastTick=0;
 const calibration=[[.1,.18],[.5,.18],[.9,.18],[.1,.5],[.5,.5],[.9,.5],[.1,.82],[.5,.82],[.9,.82]];
 const checks=[[.25,.3],[.75,.3],[.5,.55],[.25,.72],[.75,.72]];
+const samplesPerTarget=15;
+const calibrationCapacity=(calibration.length+3)*samplesPerTarget;
 const quantile=(a,q)=>{if(!a.length)return null;const s=[...a].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor((s.length-1)*q))]};
 const fmt=n=>n==null?'—':Math.round(n)+' px';
 function phase(p,n){state.phase=p;document.querySelectorAll('.steps span').forEach((s,i)=>s.classList.toggle('selected',i===n-1));}
@@ -52,6 +54,7 @@ async function startCamera(){
     webgazer.saveDataAcrossSessions(false);await webgazer.setCameraConstraints({audio:false,video:{width:{ideal:640},height:{ideal:480},facingMode:'user'}});
     if(epoch!==state.epoch)return;
     installFaceMonitor();webgazer.setRegression('ridge').setGazeListener(ingest);
+    retainCalibrationGrid(webgazer.getRegression()[0]);
     stage='camera permission and face-tracking initialization';button.textContent='Allow camera to continue…';$('#error').textContent='Allow camera access when prompted. Initializing the local tracking model can take a few seconds.';
     const startup=Promise.resolve(webgazer.begin());
     startup.then(()=>{if(epoch!==state.epoch)stopCamera();},()=>{});
@@ -69,8 +72,19 @@ async function startCamera(){
 const R=window.Reliability;
 Object.assign(state,{sequence:0,frameSequence:0,face:null,stableSince:0,pose:null,baseline:null,preChecks:[],postCheck:null,story:null,invalidated:false,interruptions:[],calibrationLog:[],validationHistory:[],lastPredictionId:0});
 let collecting=false,calSamples=0,calLastFrame=0,calLastAt=0,calSettle=0,calLastProgressAt=0,calPointStarted=0,calAnchor=null,movementSince=0,checkPurpose='pre',checkIndex=0,checkStarted=0,checkLastSlot=-1,checkLastId=0,recordNext=50,badSince=0;
-let calibrationPath=calibration.map((_,i)=>i),refining=false;
+let calibrationPath=calibration.map((_,i)=>i),refining=false,refinementStarted=false;
 const now=()=>performance.now();
+function retainCalibrationGrid(model){
+ // The bundled ridge model otherwise evicts click data after 50 samples.
+ const initialize=model.init;
+ model.init=function(){
+  initialize.call(this);
+  for(const key of ['screenXClicksArray','screenYClicksArray','eyeFeaturesClicks','dataClicks']){
+   this[key].windowSize=calibrationCapacity;
+  }
+ };
+ model.init();
+}
 function ingest(data){
  if(state.mode!=='camera')return;
  state.latest=data&&Number.isFinite(data.x)&&Number.isFinite(data.y)?{x:data.x,y:data.y,t:now(),id:++state.sequence}:null;
@@ -98,7 +112,7 @@ function fresh(){const p=state.mode==='pointer'?pointerPrediction():state.latest
 function showCalibrationIntro(){phase('calibration',2);setDesk(`<div class="welcome"><div class="eyebrow">01 / BUILD A BETTER SIGNAL</div><h2>Nine points. A steady gaze.</h2><p>Click each target once, then keep looking at its centre. The tool collects 15 spaced eye-feature samples only while your face is visible and steady. Hold for about three seconds per point; move naturally between targets.</p><p>${state.mode==='pointer'?'Pointer rehearsal uses the same timing. It cannot demonstrate webcam accuracy.':'The camera preview stays behind the target screen. If collection pauses, face the camera and settle before continuing.'}</p><div class="actions"><button class="solid" id="calibrate">Begin guided calibration →</button><button class="secondary" id="reset">Clear & disconnect</button></div></div>`);$('#calibrate').onclick=beginCalibration;$('#reset').onclick=reset;message('○ Guided calibration required');}
 function placeTarget(pt){$('#target').style.left=pt[0]*innerWidth+'px';$('#target').style.top=pt[1]*innerHeight+'px';}
 function beginCalibration(){
- refining=false;calibrationPath=calibration.map((_,i)=>i);
+ refining=false;refinementStarted=false;calibrationPath=calibration.map((_,i)=>i);
  phase('calibration',2);
  state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};state.validation=null;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.invalidated=false;state.baseline=null;state.calibrationLog=[];
  $('#accuracy').textContent='—';if(state.mode==='camera')webgazer.clearData();calIndex=0;calSamples=0;collecting=false;$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
@@ -112,7 +126,7 @@ function showCalibrationControls(){
  $('#restartCalibration').onclick=beginCalibration;$('#reconnectCalibration').onclick=reset;$('#exitCalibration').onclick=cancelTargets;
 }
 function hideCalibrationControls(){const controls=document.getElementById('calibrationControls');if(controls)controls.hidden=true;}
-function calibrationStatus(text){$('#targetProgress').textContent=`${calSamples}/15 samples · ${text}`;}
+function calibrationStatus(text){$('#targetProgress').textContent=`${calSamples}/${samplesPerTarget} samples · ${text}`;}
 function collectCalibration(){
  if(!collecting||state.phase!=='calibration'||$('#overlay').hidden)return;
  if(now()-calLastProgressAt>=15000){collecting=false;$('#target').textContent='!';calibrationStatus('Collection stopped. Restart calibration, or reconnect the camera if it keeps stopping.');return;}
@@ -129,7 +143,7 @@ function collectCalibration(){
  const pt=calibration[calibrationPath[calIndex]],x=pt[0]*innerWidth,y=pt[1]*innerHeight;
  if(state.mode==='camera'){try{webgazer.recordScreenPosition(x,y,'click');}catch(error){collecting=false;state.trackerError=error?.message;calibrationStatus('Training interrupted · Restart calibration or reconnect');return;}calLastFrame=state.face.id;}
  calLastAt=now();calLastProgressAt=now();calSamples++;calibrationStatus('Keep looking at the centre');
- if(calSamples===15){state.calibrationLog.push({point:calibrationPath[calIndex]+1,refinement:refining,x,y,samples:calSamples});calIndex++;collecting=false;if(calIndex===calibrationPath.length){hideCalibrationControls();$('#overlay').hidden=true;state.calibrated=true;state.baseline=state.face?{...state.face}:null;$('#calStatus').textContent=`${state.calibrationLog.reduce((n,p)=>n+p.samples,0)} training samples${refining?' · refined':''}`;showValidationIntro();}else calTarget();}
+ if(calSamples===samplesPerTarget){state.calibrationLog.push({point:calibrationPath[calIndex]+1,refinement:refining,x,y,samples:calSamples});calIndex++;collecting=false;if(calIndex===calibrationPath.length){hideCalibrationControls();$('#overlay').hidden=true;state.calibrated=true;state.baseline=state.face?{...state.face}:null;$('#calStatus').textContent=`${state.calibrationLog.reduce((n,p)=>n+p.samples,0)} training samples${refining?' · refined':''}`;showValidationIntro();}else calTarget();}
 }
 function showValidationIntro(){phase('validation',3);setDesk(`<div class="welcome"><div class="eyebrow">02 / INDEPENDENT CHECKS</div><h2>Check twice. Then observe.</h2><p>Run two separate five-target checks. Look at each target for four seconds without clicking. These measurements never train the model.</p><p>Each target needs median error ≤120 px, 90th-percentile error ≤200 px, ≥70% fresh signal coverage, and ≥10 unique predictions. These are provisional engineering criteria for broad regions.</p><div class="actions"><button class="solid" id="validate">Run check ${state.preChecks.length+1} of 2 →</button><button class="secondary" id="recalibrate">Recalibrate</button></div></div>`);$('#validate').onclick=()=>beginValidation('pre');$('#recalibrate').onclick=showCalibrationIntro;}
 function beginValidation(purpose='pre'){hideCalibrationControls();checkPurpose=purpose;validationRows=[];checkIndex=0;phase(purpose==='post'?'postcheck':'validation',purpose==='post'?5:3);$('#overlay').hidden=false;$('#target').disabled=true;$('#target').textContent='·';$('#target').onclick=null;startCheckTarget();}
@@ -152,7 +166,8 @@ function checkTable(v){return `<table class="quality-table"><thead><tr><th>Targe
 function targetMap(v){const w=state.viewport?.width||innerWidth,h=state.viewport?.height||innerHeight;return `<div class="target-map"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Accuracy map: target rings and median estimated positions">${v.targets.filter(t=>t.target&&t.offsetX!==null&&t.offsetY!==null).map(t=>{const x=t.target.x+t.offsetX,y=t.target.y+t.offsetY;return `<line x1="${t.target.x}" y1="${t.target.y}" x2="${x}" y2="${y}" stroke="#c95632" stroke-width="5"/><circle cx="${t.target.x}" cy="${t.target.y}" r="18" stroke="#365e4e" stroke-width="6" fill="none"/><circle cx="${x}" cy="${y}" r="12" fill="#c95632"/><text x="${t.target.x+25}" y="${t.target.y-25}" font-size="36" fill="#242e2a">${t.point}</text>`;}).join('')}</svg><p class="fine">Green rings: known targets. Orange dots: median estimated positions. Lines show displacement; positions outside the screen may be clipped. This is a diagnostic map, not a gaze heatmap.</p></div>`;}
 function diagnosticPanel(v){return `<div class="diagnostics"><div class="eyebrow">WHAT TO DO NEXT</div>${R.diagnose(v).map(m=>`<p>${m}</p>`).join('')}<p class="fine">Signal coverage measures whether a recent estimate exists. Prediction rate counts independent callbacks. A slower webcam can have good coverage; repeated estimates never count as extra accuracy measurements.</p></div>`;}
 function beginRefinement(){
- const bad=state.validation?.targets.filter(t=>!t.pass&&t.median!==null).sort((a,b)=>b.median-a.median)[0];if(!bad)return;
+ const bad=state.validation?.targets.filter(t=>!t.pass&&t.median!==null).sort((a,b)=>b.median-a.median)[0];if(!bad||refinementStarted)return;
+ refinementStarted=true;
  calibrationPath=R.refinementPoints({x:bad.target.x/innerWidth,y:bad.target.y/innerHeight},calibration);refining=true;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.baseline=null;state.invalidated=false;calIndex=0;phase('calibration',2);$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
 }
 function downloadValidation(){const report={schema:'faraday.validation.v1',exportedAt:new Date().toISOString(),mode:state.mode,thresholds:R.limits,viewport:state.viewport,calibration:state.calibrationLog,validation:state.validation,history:state.validationHistory,nonclinical:true};saveFile(JSON.stringify(report,null,2),'application/json',`faraday-validation-${Date.now()}.json`);}
@@ -165,7 +180,7 @@ function finishValidation(){
  setDesk(`<div class="welcome"><div class="eyebrow">${state.mode==='pointer'?'POINTER REHEARSAL / ':''}${result.pass?'CHECK PASSED':'QUALITY GATE FAILED'}</div><h2>${!result.pass?'Review the failed targets.':ready?'Two checks complete.':'A second check confirms consistency.'}</h2>${checkTable(result)}${targetMap(result)}${diagnosticPanel(result)}<p>${state.mode==='pointer'?'These are pointer measurements, not webcam reliability results. ':''}Thresholds apply to every target, not just the overall median. Failed checks reset the consecutive-check count.</p><div class="actions">${result.pass?`<button class="solid" id="nextCheck">${ready?'Choose a story':'Run second check'} →</button>`:''}<button class="secondary" id="recalibrate">Full recalibration</button>${!result.pass?'<button class="solid" id="refine">Refine weak area</button><button class="secondary" id="retryCheck">Repeat accuracy check</button>':''}<button class="secondary" id="exportValidation">Download diagnostics ↓</button>${state.mode==='pointer'&&!result.pass?'<button class="secondary" id="demoContinue">Preview story (rehearsal only)</button>':''}</div></div>`);
  if(result.pass)$('#nextCheck').onclick=ready?()=>showActivity(true):()=>beginValidation('pre');
  $('#recalibrate').onclick=showCalibrationIntro;$('#exportValidation').onclick=downloadValidation;
- if(!result.pass){$('#refine').onclick=beginRefinement;$('#refine').disabled=!result.targets.some(t=>!t.pass&&t.median!==null);$('#retryCheck').onclick=()=>beginValidation('pre');}
+ if(!result.pass){$('#refine').onclick=beginRefinement;$('#refine').disabled=refinementStarted||!result.targets.some(t=>!t.pass&&t.median!==null);if(refinementStarted)$('#refine').textContent='Refinement already used';$('#retryCheck').onclick=()=>beginValidation('pre');}
  if(state.mode==='pointer'&&!result.pass)$('#demoContinue').onclick=()=>showActivity(true);
  message(result.pass?'● Accuracy check complete':'○ Failed quality gate · recording blocked');
 }
