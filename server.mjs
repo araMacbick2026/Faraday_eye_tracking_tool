@@ -1,21 +1,35 @@
 import http from 'node:http';
+import { createPilot } from './pilot.mjs';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root=fileURLToPath(new URL('./dist/',import.meta.url));
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8','.md':'text/markdown; charset=utf-8','.wasm':'application/wasm','.data':'application/octet-stream','.binarypb':'application/octet-stream','.svg':'image/svg+xml','.png':'image/png'};
-export function createAppServer(){return http.createServer(async(req,res)=>{
+export function createAppServer(env = process.env, { localPreview = false } = {}){
+ const pilot = createPilot(env, { localPreview });
+ const pilotLanding = localPreview || env.PILOT_DEMO === 'true';
+ return http.createServer(async(req,res)=>{
  res.setHeader('X-Content-Type-Options','nosniff');
  res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
  res.setHeader('Permissions-Policy','camera=(self), microphone=(), geolocation=()');
  res.setHeader('Cache-Control','no-cache');
+ let url;
+ try{url=new URL(req.url,'http://localhost');}catch{res.writeHead(400);return res.end('Invalid path');}
+ let pathname;try{pathname=decodeURIComponent(url.pathname);}catch{res.writeHead(400);return res.end('Invalid path');}
+ if(await pilot(req,res,url,pathname))return;
  if(!['GET','HEAD'].includes(req.method)){res.writeHead(405,{Allow:'GET, HEAD'});return res.end('Method not allowed');}
- let pathname;try{pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);}catch{res.writeHead(400);return res.end('Invalid path');}
  if(pathname==='/health'){res.writeHead(200,{'Content-Type':'application/json'});return res.end(req.method==='HEAD'?undefined:JSON.stringify({status:'ok',app:'faraday',version:'0.3.0'}));}
- if(pathname.includes('\0')||pathname.split(/[\\/]/).some(p=>p.startsWith('.'))){res.writeHead(404);return res.end('Not found');}
- const filename=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));
+ if(/[\\:\0]/.test(pathname)||pathname.split(/[\\/]/).some(p=>p.startsWith('.'))){res.writeHead(404);return res.end('Not found');}
+ const filename=path.resolve(root,'.'+(pathname === '/' ? (pilotLanding ? '/pilot.html' : '/index.html') :
+   pathname === '/studio' || pathname === '/pilot/studio' ? '/index.html' :
+   pathname === '/pilot' || pathname === '/pilot/' ? '/pilot.html' : pathname));
  if(!filename.startsWith(path.resolve(root)+path.sep)){res.writeHead(404);return res.end('Not found');}
+ if(pilotLanding && pathname !== '/pilot/studio' &&
+    filename.replace(/[. ]+$/, '').toLowerCase() === path.join(root, 'index.html').toLowerCase()){
+  res.writeHead(302,{Location:'/pilot/studio','Cache-Control':'no-store'});
+  return res.end();
+ }
  try{const info=await stat(filename);if(!info.isFile()){res.writeHead(404);return res.end('Not found');}
   res.writeHead(200,{'Content-Type':types[path.extname(filename)]||'application/octet-stream','Content-Length':info.size});
   if(req.method==='HEAD')return res.end();

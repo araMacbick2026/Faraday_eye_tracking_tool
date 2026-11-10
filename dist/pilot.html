@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Faraday | Athlete Pilot</title>
+  <link rel="stylesheet" href="/style.css?v=10">
+  <script type="module" src="/pilot.js?v=14"></script>
+</head>
+<body class="pilot">
+  <main class="pilot-main">
+    <header class="pilot-header"><a href="/pilot/">Faraday</a><span>ATHLETE PERFORMANCE</span></header>
+    <p class="eyebrow">ATHLETE PILOT · FICTIONAL HOCKEY ROSTER</p>
+    <h1 id="pilot-title">Athlete progress</h1>
+    <p id="pilot-intro">Try the coach, athlete, or family view with one sample athlete.</p>
+    <p id="pilot-status" role="status"></p>
+    <div id="pilot-welcome" class="pilot-welcome">
+      <form id="pilot-login" class="pilot-card pilot-form">
+        <h2>Sign in</h2>
+        <label>Your role <select name="role"><option value="coach">Coach</option><option value="athlete">Athlete</option><option value="parent">Parent or guardian</option></select></label>
+        <p id="pilot-role-help" class="pilot-detail">Record skill results and follow-up checks.</p>
+        <label id="pilot-code-field">Access code <input name="code" type="password" autocomplete="current-password" required></label>
+        <p id="pilot-code-help" class="pilot-detail" hidden>Local demo access is filled in for the selected role.</p>
+        <button type="submit" disabled>Open dashboard</button>
+      </form>
+      <div class="pilot-welcome-guide">
+        <h2>Choose what you want to try</h2>
+        <dl>
+          <dt>Coach</dt><dd>Record a measurement, practice result, learning check, or school update.</dd>
+          <dt>Athlete</dt><dd>View your performance, reflect on practice, or record a nutrition check-in.</dd>
+          <dt>Parent or guardian</dt><dd>See your linked athlete’s report card and weekly progress.</dd>
+        </dl>
+        <p class="pilot-detail">Sign out to switch roles.</p>
+      </div>
+    </div>
+    <section id="pilot-dashboard" hidden aria-labelledby="pilot-title">
+      <div class="pilot-toolbar">
+        <label>Week of <input id="pilot-week" type="date" aria-describedby="pilot-period"></label>
+        <p id="pilot-period"></p>
+        <button id="pilot-logout" type="button">Sign out</button>
+      </div>
+      <nav class="pilot-report-nav" aria-label="Athlete dashboard sections">
+        <button type="button" data-panel="report" aria-pressed="true">Performance report</button>
+        <button type="button" data-panel="weekly" aria-pressed="false">Weekly progress</button>
+        <button type="button" data-panel="entry" aria-pressed="false" hidden>Add an update</button>
+      </nav>
+      <section id="pilot-report" aria-labelledby="pilot-report-title">
+        <div class="pilot-report-heading">
+          <div><p class="eyebrow">TESTING HISTORY</p><h2 id="pilot-report-title">Performance report card</h2>
+          <p>Latest results and change through the selected week.</p></div>
+          <button id="pilot-add-measurement" type="button" hidden>+ Record measurement</button>
+        </div>
+        <div id="pilot-categories" class="pilot-actions" aria-label="Metric categories"></div>
+        <div id="pilot-metrics" class="pilot-grid" aria-live="polite"></div>
+        <section id="pilot-metric-detail" class="pilot-card" aria-label="Selected metric history" hidden></section>
+        <details id="pilot-comparison" class="pilot-card pilot-history" hidden>
+          <summary>Compare with a fictional reference group</summary>
+          <p class="pilot-detail">Illustrative values for the demo. Differences use the original units. Lower times mean faster results.</p>
+          <div class="pilot-table-wrap"><table><thead><tr><th scope="col">Metric</th><th scope="col">Athlete</th><th scope="col">Demo reference</th><th scope="col">Difference</th></tr></thead><tbody id="pilot-comparison-rows"></tbody></table></div>
+        </details>
+      </section>
+      <section id="pilot-weekly" aria-labelledby="pilot-weekly-title" hidden>
+        <h2 id="pilot-weekly-title">Weekly progress</h2>
+        <div id="pilot-summary" class="pilot-grid"></div>
+        <details class="pilot-card pilot-history" open>
+          <summary>Passing history</summary>
+          <table><thead><tr><th scope="col">Date</th><th scope="col">Successful passes</th></tr></thead><tbody id="pilot-history"></tbody></table>
+        </details>
+        <section id="pilot-eye-tracking" class="pilot-card" aria-labelledby="pilot-eye-title" hidden>
+          <h2 id="pilot-eye-title">Optional eye-tracking activity</h2>
+          <p id="pilot-eye-help"></p>
+          <a href="/pilot/studio">Open eye-tracking studio →</a>
+        </section>
+      </section>
+      <section id="pilot-actions" hidden aria-labelledby="pilot-action-title">
+        <h2 id="pilot-action-title">Add an update</h2>
+        <div id="pilot-action-buttons" class="pilot-actions"></div>
+        <p id="pilot-action-status" role="status"></p>
+        <div id="pilot-forms" class="pilot-grid"></div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>
