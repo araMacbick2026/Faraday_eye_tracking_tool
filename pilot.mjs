@@ -52,6 +52,21 @@ const writers = {
 };
 const outcomes = ['independent', 'prompted', 'not yet'];
 
+function observationSummary(body, role) {
+  const { story, mode, quality, durationMs, coverage, predictions, beforePx, afterPx, pauses } = body;
+  const validQuality = mode === 'pointer' ? quality === 'rehearsal-not-gaze' :
+    mode === 'camera' && ['provisional-broad-region-only', 'not-suitable-for-interpretation'].includes(quality);
+  const inRange = (value, max) => Number.isInteger(value) && value >= 0 && value <= max;
+  const validError = value => value === null || inRange(value, 100000);
+  if (typeof story !== 'string' || !story.trim() || story.length > 120 || !validQuality ||
+      !inRange(durationMs, 45000) || !inRange(coverage, 100) || !inRange(predictions, 901) ||
+      !validError(beforePx) || !validError(afterPx) || !inRange(pauses, 1000)) {
+    throw new Error('The observation summary is invalid.');
+  }
+  return { story: story.trim(), mode, quality, durationMs, coverage, predictions, beforePx, afterPx, pauses,
+    savedAt: new Date().toISOString(), savedBy: role };
+}
+
 function json(res, status, body, headers = {}) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
@@ -132,6 +147,7 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
   }
   const sessions = new Map();
   const failures = new Map();
+  let observation = null;
   const secure = env.NODE_ENV === 'production' ? '; Secure' : '';
   const cookie = value => 'faraday_pilot=' + value + '; Path=/pilot; HttpOnly; SameSite=Strict' + secure;
   const digest = value => createHash('sha256').update(value).digest();
@@ -212,9 +228,18 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       const measurements = visible.filter(record => record.type === 'measurement' && dateValue(record.date) < end)
         .sort((a, b) => a.date.localeCompare(b.date));
       json(res, 200, { role, athlete, shareNutrition, date, history, weekly, measurements,
+        ...(role !== 'parent' ? { observation } : {}),
         reference: demoData ? demoReference : null,
         weekStart: new Date(start).toISOString().slice(0, 10),
         weekEnd: new Date(end - 86400000).toISOString().slice(0, 10) });
+    } else if (pathname === '/pilot/api/observations' && req.method === 'POST') {
+      if (role === 'parent') { json(res, 403, { error: 'This role cannot save an observation.' }); return true; }
+      try {
+        observation = observationSummary(await readJson(req), role);
+        json(res, 201, { savedAt: observation.savedAt });
+      } catch (error) {
+        json(res, 400, { error: error.message });
+      }
     } else if (pathname === '/pilot/api/entries' && req.method === 'POST') {
       let entry;
       try {

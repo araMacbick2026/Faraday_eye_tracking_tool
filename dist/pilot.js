@@ -20,12 +20,15 @@ const actionStatus = document.querySelector('#pilot-action-status');
 const title = document.querySelector('#pilot-title');
 const reportNav = document.querySelector('.pilot-report-nav');
 const addMeasurement = document.querySelector('#pilot-add-measurement');
+const observationSummary = document.querySelector('#pilot-observation-summary');
+const observationTab = reportNav.querySelector('[data-panel="observation"]');
 const panels = {
   report: document.querySelector('#pilot-report'),
   weekly: document.querySelector('#pilot-weekly'),
+  observation: document.querySelector('#pilot-eye-tracking'),
   entry: actions
 };
-let selectedPanel = 'report';
+let selectedPanel = location.hash === '#eye-tracking' ? 'observation' : 'report';
 const roleLabels = { coach: 'Coach', athlete: 'Athlete', parent: 'Parent or guardian' };
 const demoNames = { coach: 'Taylor Reed', athlete: 'Alex Morgan', parent: 'Jamie Morgan' };
 const descriptions = {
@@ -102,11 +105,36 @@ function selectPanel(panel) {
 function setMeasurementUnit() {
   const entry = forms.querySelector('[data-type="measurement"]');
   const metric = metrics.find(item => item.id === entry.elements.metricId.value);
-  entry.querySelector('[data-unit]').textContent = metric.unit;
+  entry.querySelector('[data-result-label]').textContent = 'Result (' + metric.unit + ')';
   const field = entry.elements.value;
   field.max = metric.max;
   field.step = metric.integer ? '1' : '0.01';
   field.min = metric.timed || metric.category === 'Body' ? '0.01' : '0';
+}
+
+function renderObservation(observation) {
+  if (!observation) {
+    observationSummary.textContent = 'No observation saved yet. Finish an activity and choose Save summary in the studio.';
+    return;
+  }
+  const quality = {
+    'rehearsal-not-gaze': 'Pointer rehearsal only',
+    'provisional-broad-region-only': 'Webcam · provisional broad-region estimates',
+    'not-suitable-for-interpretation': 'Webcam quality check incomplete or failed'
+  };
+  const pixels = value => value === null ? 'Not checked' : value + ' px';
+  const results = {
+    'Active time': (observation.durationMs / 1000).toFixed(1) + ' s',
+    'Fresh signal coverage': observation.coverage + '%',
+    'Unique predictions': observation.predictions,
+    'Median error before': pixels(observation.beforePx),
+    'Median error after': pixels(observation.afterPx),
+    'Pauses': observation.pauses
+  };
+  observationSummary.innerHTML = '<p><strong>' + escape(observation.story) + '</strong> · ' +
+    escape(quality[observation.quality]) + '</p><p>Saved by ' + escape(roleLabels[observation.savedBy]) + ' · ' +
+    escape(new Date(observation.savedAt).toLocaleString()) + '</p><dl class="pilot-metric-change">' +
+    Object.entries(results).map(([label, value]) => '<div><dt>' + escape(label) + '</dt><dd>' + escape(value) + '</dd></div>').join('') + '</dl>';
 }
 
 function render(data) {
@@ -115,10 +143,8 @@ function render(data) {
   document.querySelector('#pilot-intro').textContent = [athlete.team, athlete.position, athlete.season].filter(Boolean).join(' · ');
   document.querySelector('#pilot-period').textContent = dateLabel(weekStart) + ' to ' + dateLabel(weekEnd);
   week.value = weekStart;
-  document.querySelector('#pilot-eye-tracking').hidden = role === 'parent';
-  document.querySelector('#pilot-eye-help').textContent = role === 'coach'
-    ? 'Open the studio to guide an athlete through the practice activity.'
-    : 'Open the studio when your coach asks you to try the practice activity.';
+  observationTab.hidden = role === 'parent';
+  renderObservation(data.observation);
   const baseline = history[0];
   const result = latest(weekly, 'skill');
   const followup = latest(weekly, 'followup');
@@ -147,7 +173,7 @@ function render(data) {
       metric.name + ' · ' + metric.unit + '</option>').join('');
     forms.innerHTML = form('measurement', 'Record an athlete measurement',
       '<label>Test <select name="metricId">' + options + '</select></label>' +
-      '<label>Result (<span data-unit></span>) <input name="value" type="number" inputmode="decimal" required></label>' +
+      '<label><span data-result-label>Result</span><input name="value" type="number" inputmode="decimal" required></label>' +
       optionalNotes, data.date) + form('skill', 'Log a passing drill',
       '<label>Attempts <input name="attempts" type="number" min="1" max="100" required></label>' +
       '<label>Successful passes <input name="successful" type="number" min="0" max="100" required></label>' + optionalNotes, data.date) +
@@ -166,7 +192,10 @@ function render(data) {
   addMeasurement.hidden = role !== 'coach';
   if (role === 'coach') setMeasurementUnit();
   renderReport(data);
-  selectPanel(selectedPanel === 'entry' && !types.length ? 'report' : selectedPanel);
+  if (selectedPanel === 'entry' && !types.length || selectedPanel === 'observation' && observationTab.hidden) {
+    selectedPanel = 'report';
+  }
+  selectPanel(selectedPanel);
   actionButtons.innerHTML = types.map(type =>
     '<button type="button" data-action="' + type + '" aria-pressed="false">' + actionLabels[type] + '</button>').join('');
   selectAction(types.includes(selectedAction) ? selectedAction : types[0]);
@@ -185,6 +214,7 @@ async function load(date) {
       dashboard.hidden = true;
       welcome.hidden = false;
       summary.replaceChildren();
+      observationSummary.replaceChildren();
       clearReport();
       forms.replaceChildren();
       document.querySelector('#pilot-history').replaceChildren();
@@ -299,3 +329,6 @@ async function initialize() {
 }
 
 initialize();
+window.addEventListener('pageshow', event => {
+  if (event.persisted) load(week.value);
+});

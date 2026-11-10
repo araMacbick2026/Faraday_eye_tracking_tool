@@ -42,6 +42,24 @@ v.run("validationRows=[{point:1,slots:60,errors:[]}];finishValidation()");assert
 const canceled=environment();canceled.run("state.mode='pointer';chooseStory();state.activityRect={width:600,height:440};beginValidation('post');cancelTargets()");assert.equal(canceled.run('state.postCheck'),null);assert.equal(canceled.run('state.phase'),'review');
 console.log('PASS: two consecutive checks, failed-check reset, JSON/CSV serialization and labels, cancelled drift-check recovery.');
 
+const integrated = environment();
+integrated.context.location.pathname = '/pilot/studio';
+let summaryRequest;
+integrated.get('#regions').insertAdjacentHTML = (_, html) => assert.match(html, /Save summary to athlete dashboard/);
+integrated.context.fetch = async (url, options) => {
+  assert.equal(url, '/pilot/api/observations');
+  assert.equal(options.method, 'POST');
+  summaryRequest = JSON.parse(options.body);
+  return { ok: true, json: async () => ({}) };
+};
+integrated.run("state.mode='pointer';chooseStory();state.activityRect={width:600,height:440};state.interruptions=[];state.samples=[{x:10,y:20,valid:true}];renderReview()");
+await integrated.get('#saveObservation').onclick();
+assert.equal(summaryRequest.quality, 'rehearsal-not-gaze');
+assert.equal(summaryRequest.predictions, 1);
+assert.equal('samples' in summaryRequest, false);
+assert.match(integrated.get('#observationStatus').textContent, /Saved/);
+console.log('PASS: studio saves only the observation summary to the athlete dashboard.');
+
 const stall=environment();stall.run("state.mode='camera';beginCalibration();clickCalibration();calSamples=11;state.face={x:.5,y:.5,scale:.2,t:now(),id:11};state.stableSince=0;calLastFrame=11");
 stall.advance(1000);stall.run('collectCalibration()');assert.match(stall.get('#targetProgress').textContent,/No fresh eye frames/);assert.equal(stall.run('calSamples'),11);
 stall.advance(15000);stall.run('collectCalibration()');assert.equal(stall.run('collecting'),false);assert.match(stall.get('#targetProgress').textContent,/Collection stopped/);assert.equal(stall.get('#calibrationControls').hidden,false);

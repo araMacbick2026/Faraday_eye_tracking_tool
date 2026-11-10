@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Faraday | Athlete Pilot</title>
-  <link rel="stylesheet" href="/style.css?v=10">
-  <script type="module" src="/pilot.js?v=14"></script>
+  <link rel="stylesheet" href="/style.css?v=11">
+  <script type="module" src="/pilot.js?v=16"></script>
 </head>
 <body class="pilot">
   <main class="pilot-main">
@@ -42,6 +42,7 @@
       <nav class="pilot-report-nav" aria-label="Athlete dashboard sections">
         <button type="button" data-panel="report" aria-pressed="true">Performance report</button>
         <button type="button" data-panel="weekly" aria-pressed="false">Weekly progress</button>
+        <button type="button" data-panel="observation" aria-pressed="false" hidden>Eye tracking</button>
         <button type="button" data-panel="entry" aria-pressed="false" hidden>Add an update</button>
       </nav>
       <section id="pilot-report" aria-labelledby="pilot-report-title">
@@ -66,11 +67,19 @@
           <summary>Passing history</summary>
           <table><thead><tr><th scope="col">Date</th><th scope="col">Successful passes</th></tr></thead><tbody id="pilot-history"></tbody></table>
         </details>
-        <section id="pilot-eye-tracking" class="pilot-card" aria-labelledby="pilot-eye-title" hidden>
-          <h2 id="pilot-eye-title">Optional eye-tracking activity</h2>
-          <p id="pilot-eye-help"></p>
-          <a href="/pilot/studio">Open eye-tracking studio →</a>
-        </section>
+      </section>
+      <section id="pilot-eye-tracking" aria-labelledby="pilot-eye-title" hidden>
+        <div class="pilot-report-heading">
+          <div><p class="eyebrow">LEARNING OBSERVATORY</p><h2 id="pilot-eye-title">Eye tracking</h2>
+          <p>Run a guided reading activity with a webcam or rehearse with the pointer.</p></div>
+          <a class="pilot-launch" href="/pilot/studio">Open eye-tracking studio →</a>
+        </div>
+        <article class="pilot-card">
+          <h3>Latest saved observation</h3>
+          <div id="pilot-observation-summary"></div>
+          <p class="pilot-detail">Coach and athlete share this summary. The full review, heatmap, and raw exports are in the studio during the session.</p>
+        </article>
+        <p class="pilot-detail">Exploratory adult testing. Gaze estimates do not measure attention, comprehension, or athletic performance.</p>
       </section>
       <section id="pilot-actions" hidden aria-labelledby="pilot-action-title">
         <h2 id="pilot-action-title">Add an update</h2>

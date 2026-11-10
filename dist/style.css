@@ -41,6 +41,8 @@
 .pilot-report-nav button[aria-pressed="false"]{background:transparent;color:var(--green)}
 .pilot-report-heading{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin:20px 0}
 .pilot-report-heading p{margin:0}
+.pilot-launch{display:inline-block;padding:8px 14px;border-radius:4px;background:var(--green);color:white;text-decoration:none}
+.pilot-launch:hover{text-decoration:underline}
 .pilot-report-heading h2{font-size:clamp(1.7rem,4vw,2.45rem);margin:.1em 0}
 #pilot-metrics{grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr))}
 .pilot-metric{display:flex;flex-direction:column;min-width:0;border-radius:8px}

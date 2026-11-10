@@ -12,7 +12,7 @@ The intended source repository is https://github.com/araMacbick2026/Faraday_eye_
 
 The app can now run with `npm start`; it listens on Railway's PORT (default 8080). No dependency installation or app secrets are required. Dockerfile builds a non-root Node 24 container and serves only dist. railway.json configures the /health readiness endpoint. `npm test` runs browser-logic regressions plus real HTTP delivery, MIME, healthcheck and file-exposure checks. GitHub Actions runs the same checks on pushes and pull requests after upload.
 
-The Railway URL exposes the demo without the ChatGPT access gate used by Sites. Camera frames and samples remain in-browser; this server has no session-upload endpoint. The existing Sites deployment is separate.
+The Railway URL exposes the demo without the ChatGPT access gate used by Sites. Camera frames and raw gaze samples remain in the browser. The existing Sites deployment is separate.
 
 ## Athlete pilot
 
@@ -23,3 +23,5 @@ The coach records the same hockey passing drill, a follow-up learning check, and
 To enable the pilot on a hosted server, set distinct, randomly generated `PILOT_COACH_CODE`, `PILOT_ATHLETE_CODE`, and `PILOT_PARENT_CODE` values of at least 16 characters. Use HTTPS and production mode. Set `PILOT_DATA_FILE` to an absolute file path in a writable persistent volume outside `dist`, using one app instance. With no data file, records are in memory. Parent nutrition is off by default and can be enabled with `PILOT_SHARE_NUTRITION=true`. This single-roster pilot uses role access codes. Use individual accounts and athlete assignments before onboarding real families.
 
 Set `PILOT_DEMO=true` to make the sign-in page the hosted landing page and load the fictional report-card and weekly sample data. Hosted users enter their role's access code manually.
+
+Coach and athlete can open **Eye tracking** from the dashboard. The studio review offers an explicit save for the latest observation summary. Only its story, session counts, and quality metrics are shared with those two roles. Raw samples, camera frames, and the heatmap stay in the studio. The saved summary is held in memory and resets on restart.

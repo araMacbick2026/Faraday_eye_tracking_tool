@@ -146,6 +146,9 @@ test('hosted demo starts at sign-in and loads sample data without exposing PINs'
     assert.match(await (await app.request('/')).text(), /Your role/);
     assert.deepEqual(await (await app.request('/pilot/api/setup')).json(), { enabled: true, demoPins: null, demo: true });
     assert.equal((await app.request('/studio', { redirect: 'manual' })).headers.get('location'), '/pilot/studio');
+    const summary = { story: 'A sample story', mode: 'pointer', quality: 'rehearsal-not-gaze',
+      durationMs: 12000, coverage: 95, predictions: 215, beforePx: 12, afterPx: null, pauses: 0 };
+    assert.equal((await app.request('/pilot/api/observations', post(summary))).status, 401);
     for (const [role, code] of Object.entries(codes)) {
       const response = await app.request('/pilot/api/login', post({ role, code }));
       assert.equal(response.status, 200);
@@ -156,6 +159,18 @@ test('hosted demo starts at sign-in and loads sample data without exposing PINs'
       assert.equal(new Set(data.measurements.map(item => item.metricId)).size, 14);
       assert.ok(data.weekly.some(item => item.type === 'followup'));
       assert.equal(data.weekly.filter(item => item.type === 'nutrition').length, role === 'coach' ? 0 : 2);
+      if (role === 'coach') {
+        assert.equal(data.observation, null);
+        assert.equal((await app.request('/pilot/api/observations', post({ ...summary, coverage: 101 }, cookie))).status, 400);
+        assert.equal((await app.request('/pilot/api/observations', post({ ...summary, samples: [{ x: 123, y: 321 }] }, cookie))).status, 201);
+      } else if (role === 'athlete') {
+        const { savedAt, ...observation } = data.observation;
+        assert.ok(Date.parse(savedAt));
+        assert.deepEqual(observation, { ...summary, savedBy: 'coach' });
+      } else {
+        assert.equal('observation' in data, false);
+        assert.equal((await app.request('/pilot/api/observations', post(summary, cookie))).status, 403);
+      }
     }
   } finally { await app.close(); }
 });
