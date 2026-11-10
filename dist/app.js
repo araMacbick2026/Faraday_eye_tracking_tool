@@ -11,10 +11,60 @@ const samplesPerTarget=15;
 const calibrationCapacity=(calibration.length+3)*samplesPerTarget;
 const quantile=(a,q)=>{if(!a.length)return null;const s=[...a].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor((s.length-1)*q))]};
 const fmt=n=>n==null?'—':Math.round(n)+' px';
+const sampleReading=window.STORIES.find(story=>story.id==='bridge');
+const escapeText=value=>String(value??'').replace(/[&<>"']/g, character=>
+ ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[character]);
 function phase(p,n){readingStartDeadline=0;state.phase=p;document.querySelectorAll('.steps span').forEach((s,i)=>{const active=i===n-1;s.classList.toggle('selected',active);if(active)s.setAttribute('aria-current','step');else s.removeAttribute('aria-current');});}
 function message(s){$('#signal').textContent=s;}
 function setDesk(html){$('#desk').innerHTML=html;}
-function setup(){phase('setup',1);setDesk(`<div class="welcome"><div class="eyebrow">Before you begin</div><h2>How would you like to start?</h2><p>Use your webcam to estimate where you look, or use your pointer to try the activity.</p><label class="consent"><input id="consent" type="checkbox"><span>I agree to use my camera for this activity. Video stays in this browser and is never recorded.</span></label><div class="actions"><button class="solid" id="camera" disabled>Use my camera</button><button class="secondary" id="rehearse">Practise with pointer</button></div><p class="small-note">About 5 minutes · For adults using a desktop or laptop</p><div id="error" role="status"></div></div>`);$('#consent').onchange=e=>$('#camera').disabled=!e.target.checked;$('#camera').onclick=startCamera;$('#rehearse').onclick=()=>startMode('pointer');}
+function setup(){
+ phase('setup',1);
+ setDesk(`<div class="welcome"><p class="eyebrow">Before you begin</p><h2>Set up your reading activity</h2>
+ <p>Use the same passage for each trial to compare how well the camera tracks.</p>
+ <div class="reading-material"><p class="eyebrow">Reading for this trial</p><p id="readingChoice" role="status"></p>
+ <details><summary>Choose or add a passage</summary>
+ <label for="readingPreset">Faraday readings</label><select id="readingPreset"><option value="" disabled>Choose a Faraday reading</option>${window.STORIES.map(story=>`<option value="${escapeText(story.id)}">${escapeText(story.title)}</option>`).join('')}<option value="random">Pick a different story each time</option></select>
+ <form id="readingMaterial"><h3>Use your own passage</h3><p>Paste a short passage for this activity. Saving a dashboard summary shares the title and results.</p>
+ <label>Title<input name="title" maxlength="100" required></label>
+ <label>Passage<textarea name="passage" rows="5" maxlength="1600" required></textarea></label>
+ <label><span>Side note <small>Optional</small></span><input name="note" maxlength="180"></label>
+ <label><span>Reflection question <small>Optional</small></span><input name="question" maxlength="180"></label>
+ <p id="readingMaterialStatus" role="status"></p><button class="secondary" type="submit">Use this passage</button></form></details></div>
+ <label class="consent"><input id="consent" type="checkbox"><span>I agree to use my camera for this activity. Video stays in this browser and is never recorded.</span></label>
+ <div class="actions"><button class="solid" id="camera" disabled>Use my camera</button><button class="secondary" id="rehearse">Practise with pointer</button></div>
+ <p class="small-note">About 5 minutes · For adults using a desktop or laptop</p><div id="error" role="status"></div>${checkHistory()}</div>`);
+ const preset=$('#readingPreset');
+ preset.value=state.reading?.id==='pilot-reading'?'':state.reading?.id??'random';
+ preset.onchange=()=>{
+  state.reading=window.STORIES.find(story=>story.id===preset.value)??null;
+  state.story=null;updateReadingChoice();
+  $('#readingMaterialStatus').textContent='';
+ };
+ const material=$('#readingMaterial');
+ if(state.reading?.id==='pilot-reading'&&material.elements){
+  material.elements.title.value=state.reading.title;
+  material.elements.passage.value=state.reading.paragraphs.join('\n\n');
+  material.elements.note.value=state.reading.diagram[0]??'';
+  material.elements.question.value=state.reading.question;
+ }
+ material.onsubmit=event=>{
+  event.preventDefault();
+  const {title,passage,note,question}=material.elements;
+  if(!title.value.trim()||!passage.value.trim()){
+   $('#readingMaterialStatus').textContent='Enter a title and some reading text.';return;
+  }
+  state.reading={id:'pilot-reading',category:'Your reading',title:title.value.trim(),
+   paragraphs:passage.value.trim().split(/\r?\n\s*\r?\n/),
+   diagram:note.value.trim()?[note.value.trim()]:[],question:question.value.trim()};
+  state.story=null;preset.value='';updateReadingChoice();
+  $('#readingMaterialStatus').textContent='This passage is ready for your trial.';
+ };
+ updateReadingChoice();
+ bindCheckHistory();
+ $('#consent').onchange=e=>$('#camera').disabled=!e.target.checked;
+ $('#camera').onclick=startCamera;$('#rehearse').onclick=()=>startMode('pointer');
+}
+function updateReadingChoice(){$('#readingChoice').textContent=state.reading?.title??'A different Faraday story each time';}
 let trackerPromise,cameraStarting=false;
 function timeoutError(stage){const e=new Error(stage+' timed out');e.name='TimeoutError';return e;}
 function withTimeout(promise,ms,stage){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(timeoutError(stage)),ms);})]).finally(()=>clearTimeout(timer));}
@@ -76,7 +126,7 @@ async function startCamera(){
   }finally{cameraStarting=false;}
 }
 const R=window.Reliability;
-Object.assign(state,{sequence:0,frameSequence:0,face:null,stableSince:0,pose:null,baseline:null,preChecks:[],postCheck:null,story:null,invalidated:false,interruptions:[],calibrationLog:[],calibrationPoses:[],validationHistory:[],lastPredictionId:0});
+Object.assign(state,{sequence:0,frameSequence:0,face:null,stableSince:0,pose:null,baseline:null,preChecks:[],postCheck:null,reading:sampleReading,story:null,invalidated:false,interruptions:[],calibrationAttempt:0,calibrationLog:[],calibrationPoses:[],validationHistory:[],lastPredictionId:0});
 let collecting=false,calSamples=0,calLastFrame=0,calLastAt=0,calSettle=0,calLastProgressAt=0,calAnchor=null,movementSince=0,checkPurpose='pre',checkIndex=0,checkStarted=0,checkLastSlot=-1,checkLastId=0,recordNext=50,badSince=0;
 let calibrationPath=calibration.map((_,i)=>i),refinementPath=[],refining=false,refinementStarted=false;
 const gazeWindow=[];
@@ -172,6 +222,7 @@ function placeTarget(pt){$('#target').style.left=pt[0]*innerWidth+'px';$('#targe
 function beginCalibration(quick=false){
  clearGazeWindow();
  state.quickPreview=quick===true&&state.mode==='camera';
+ if(state.mode==='camera'&&!state.quickPreview)state.calibrationAttempt++;
  refining=false;refinementStarted=false;calibrationPath=(state.quickPreview?previewCalibration:calibration).map((_,i)=>i);
  phase('calibration',2);
  state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};state.validation=null;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.invalidated=false;state.baseline=null;state.calibrationLog=[];state.calibrationPoses=[];state.calibrationModel=null;
@@ -267,10 +318,42 @@ function beginRefinement(){
  clearGazeWindow();
  calibrationPath=refinementPath.map((_,i)=>i);refining=true;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.baseline=null;state.invalidated=false;calIndex=0;phase('calibration',2);$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
 }
-function downloadValidation(){const report={schema:'faraday.validation.v1',exportedAt:new Date().toISOString(),mode:state.mode,gazeFilter:state.mode==='camera'?gazeFilter:null,thresholds:R.limits,viewport:state.viewport,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validation:state.validation,history:state.validationHistory,nonclinical:true};saveFile(JSON.stringify(report,null,2),'application/json',`faraday-validation-${Date.now()}.json`);}
+function checkHistoryRows(){
+ return state.validationHistory.filter(check=>check.mode==='camera').map(check=>({
+  checkedAt:check.checkedAt,reading:check.readingTitle??'',setup:check.calibrationAttempt||'',adjusted:check.adjusted,
+  stage:check.purpose==='post'?'After reading':'Before reading',passed:check.targets.filter(target=>target.pass).length,
+  total:check.targets.length,median:check.median,p90:check.p90,coverage:Math.round(check.coverage*100),
+  width:check.viewport?.width,height:check.viewport?.height,outcome:check.pass?'Passed':'Did not pass'
+ }));
+}
+function checkHistory(){
+ const rows=checkHistoryRows();
+ if(!rows.length)return '';
+ return `<details class="accuracy-details"><summary>Compare accuracy checks (${rows.length})</summary>
+ <p>${rows.filter(row=>row.outcome==='Passed').length} of ${rows.length} completed camera checks passed.</p>
+ <div class="check-history-table"><table class="quality-table"><thead><tr><th scope="col">Check</th><th scope="col">Setup</th><th scope="col">When</th><th scope="col">Dots passed</th><th scope="col">Typical distance</th><th scope="col">Result</th></tr></thead>
+ <tbody>${rows.map((row,index)=>`<tr><td>${index+1}</td><td>${row.setup||'—'}${row.adjusted?' · Adjusted':''}</td><td>${row.stage}</td><td>${row.passed} of ${row.total}</td><td>${fmt(row.median)}</td><td>${row.outcome}</td></tr>`).join('')}</tbody></table></div>
+ <button class="secondary" id="downloadCheckHistory">Download checks for a spreadsheet</button></details>`;
+}
+function csvCell(value){
+ const text=String(value??'');
+ const safe=typeof value==='string'&&/^\s*[=+\-@]/.test(text)?"'"+text:text;
+ return '"'+safe.replaceAll('"','""')+'"';
+}
+function checkHistoryCsv(){
+ return ['checked_at,reading,setup,adjusted,stage,targets_passed,targets_checked,median_px,p90_px,tracking_percent,window_width_px,window_height_px,result',
+  ...checkHistoryRows().map(row=>Object.values(row).map(csvCell).join(','))].join('\r\n');
+}
+function bindCheckHistory(){
+ const button=$('#downloadCheckHistory');
+ if(button)button.onclick=()=>saveFile(checkHistoryCsv(),'text/csv',`faraday-checks-${Date.now()}.csv`);
+}
+function downloadValidation(){const report={schema:'faraday.validation.v1',exportedAt:new Date().toISOString(),mode:state.mode,gazeFilter:state.mode==='camera'?gazeFilter:null,thresholds:R.limits,viewport:state.viewport,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validation:state.validation,history:state.validationHistory.filter(check=>check.mode===state.mode),nonclinical:true};saveFile(JSON.stringify(report,null,2),'application/json',`faraday-validation-${Date.now()}.json`);}
 function finishValidation(){
  if(checkPurpose==='preview'){showPreviewResult(R.summarize(validationRows,previewChecks.length));return;}
- const result={...R.summarize(validationRows,checks.length),purpose:checkPurpose,mode:state.mode,checkedAt:new Date().toISOString(),viewport:state.viewport};state.validationHistory.push(result);
+ const result={...R.summarize(validationRows,checks.length),purpose:checkPurpose,mode:state.mode,checkedAt:new Date().toISOString(),
+  viewport:state.viewport,readingTitle:state.reading?.title??state.story?.title??null,calibrationAttempt:state.calibrationAttempt,adjusted:refining};
+ state.validationHistory.push(result);
  if(checkPurpose==='post'){state.postCheck=result;renderReview();return;}
  if(result.pass){
   state.preChecks.push(result);
@@ -291,7 +374,8 @@ function finishValidation(){
   ${!result.pass&&!restartCalibration?'<button class="secondary" id="retryCheck">Check again</button>':''}
   ${!result.pass?`<button class="secondary" id="demoContinue">${state.mode==='camera'?'Practise with pointer':'Read a practice story'}</button>`:''}</div>
   <details class="accuracy-details"><summary>See results for each target</summary>${checkTable(result)}${targetMap(result)}
-  <button class="secondary" id="exportValidation">Download check results</button></details></div>`);
+  <button class="secondary" id="exportValidation">Download check results</button></details>${state.mode==='camera'?checkHistory():''}</div>`);
+ bindCheckHistory();
  if(result.pass)$('#nextCheck').onclick=ready?()=>showActivity():()=>beginValidation('pre');
  $('#recalibrate').onclick=showCalibrationIntro;$('#exportValidation').onclick=downloadValidation;
  if(canRefine)$('#refine').onclick=beginRefinement;
@@ -299,12 +383,20 @@ function finishValidation(){
  if(!result.pass)$('#demoContinue').onclick=()=>{if(state.mode==='camera'){reset();startMode('pointer');}showActivity(true);};
  message(result.pass?'Accuracy check complete.':'The camera checks need to pass before you can read.');
 }
-function chooseStory(){state.story=R.choose(window.STORIES,state.story?.id);}
-function lesson(){const s=state.story;return `<div class="activity" id="activity"><div class="activity-inner"><article data-region="reading"><div class="eyebrow">${s.category} · ${s.id.toUpperCase()}</div><h2>${s.title}</h2>${s.paragraphs.map(p=>`<p>${p}</p>`).join('')}<p><b>Consider:</b> ${s.question}</p></article><div class="diagram" data-region="diagram"><span class="story-symbol" aria-hidden="true">${s.symbol}</span><div class="eyebrow">STORY THREAD</div>${s.diagram.map((p,i)=>`<p>${i?'↓<br>':''}${p}</p>`).join('')}</div></div><canvas id="heatmap" aria-hidden="true" hidden></canvas></div>`;}
+function chooseStory(){state.story=state.reading??R.choose(window.STORIES,state.story?.id);}
+function lesson(){
+ const story=state.story,hasSideNote=story.diagram.length>0;
+ return `<div class="activity" id="activity"><div class="activity-inner${hasSideNote?'':' activity-text-only'}">
+ <article data-region="reading"><p class="eyebrow">${escapeText(story.category)}</p><h2>${escapeText(story.title)}</h2>
+ ${story.paragraphs.map(paragraph=>`<p>${escapeText(paragraph)}</p>`).join('')}
+ ${story.question?`<p><b>Consider:</b> ${escapeText(story.question)}</p>`:''}</article>
+ ${hasSideNote?`<div class="diagram" data-region="diagram">${story.symbol?`<span class="story-symbol" aria-hidden="true">${escapeText(story.symbol)}</span>`:''}<p class="eyebrow">${story.symbol?'Story thread':'Side note'}</p>${story.diagram.map((note,i)=>`<p>${i?'↓<br>':''}${escapeText(note)}</p>`).join('')}</div>`:''}
+ </div><canvas id="heatmap" aria-hidden="true" hidden></canvas></div>`;
+}
 function showActivity(randomize=false){
  if(state.mode==='camera'&&(!state.calibrated||state.preChecks.length<2||state.invalidated)){showCalibrationIntro();return;}
  if(randomize||!state.story)chooseStory();phase('ready',4);
- setDesk(`<div class="actions"><button class="solid" id="start">Start reading</button><button class="secondary" id="shuffle">Choose another story</button><button class="secondary" id="redo">Recheck accuracy</button></div><p id="readingStartStatus" role="status" hidden></p><p class="small-note">Story ${window.STORIES.findIndex(s=>s.id===state.story.id)+1} OF ${window.STORIES.length}</p>${lesson()}<p class="small-note">Read at your own pace. We’ll check accuracy again when you finish.</p>`);
+ setDesk(`<div class="actions"><button class="solid" id="start">Start reading</button><button class="secondary" id="shuffle"${state.reading?' hidden':''}>Choose another story</button><button class="secondary" id="redo">Recheck accuracy</button></div><p id="readingStartStatus" role="status" hidden></p>${state.reading?'<p class="small-note">Same passage for each trial</p>':''}${lesson()}<p class="small-note">Read at your own pace. We’ll check accuracy again when you finish.</p>`);
  $('#start').onclick=startRecording;$('#shuffle').onclick=()=>showActivity(true);$('#redo').onclick=()=>{state.preChecks=[];showValidationIntro();};
 }
 function rectJSON(r){return{x:r.x,y:r.y,width:r.width,height:r.height};}
@@ -399,11 +491,14 @@ function renderReview(){
   ${lesson()}<div class="actions"><button class="secondary" id="heatToggle">${usable||pointer?'Hide heatmap':'Show troubleshooting map'}</button></div>
   <p class="small-note" id="regions"></p><p class="fine">Darker areas show more readings. The map can’t tell whether you understood the story.</p>
   <details class="accuracy-details review-downloads"><summary>Download results</summary><div class="actions"><button class="secondary" id="json">Download full results</button><button class="secondary" id="csv">Download readings for a spreadsheet</button></div></details>
-  <div class="actions"><button class="secondary" id="again">Read another story</button><button class="secondary" id="clear">${pointer?'End practice':'Disconnect camera'}</button></div>`);
- const visible=usable||state.mode==='pointer';$('#heatmap').hidden=!visible;if(visible)drawHeatmap();$('#heatToggle').onclick=()=>{const c=$('#heatmap');c.hidden=!c.hidden;if(!c.hidden)drawHeatmap();$('#heatToggle').textContent=c.hidden?'Show troubleshooting map':'Hide heatmap';};
- const regionLabels={reading:'Story',diagram:'Illustration','outside activity':'Outside the story',missing:'No new reading'};
+  <div class="actions"><button class="secondary" id="again">${state.reading?'Repeat this reading':'Read another story'}</button><button class="secondary" id="clear">${pointer?'End practice':'Disconnect camera'}</button></div>${pointer?'':checkHistory()}`);
+ const visible=usable||pointer;
+ $('#heatmap').hidden=!visible;$('#regions').hidden=!visible;if(visible)drawHeatmap();
+ $('#heatToggle').onclick=()=>{const c=$('#heatmap');c.hidden=!c.hidden;$('#regions').hidden=c.hidden;if(!c.hidden)drawHeatmap();$('#heatToggle').textContent=c.hidden?(usable||pointer?'Show heatmap':'Show troubleshooting map'):'Hide heatmap';};
+ const regionLabels={reading:'Passage',...(state.story.diagram.length?{diagram:state.story.symbol?'Illustration':'Side note'}:{}),'outside activity':'Outside the activity',missing:'No new reading'};
  $('#regions').textContent=Object.entries(regionLabels).map(([region,label])=>`${label}: ${state.samples.length?Math.round(state.samples.filter(s=>s.region===region).length/state.samples.length*100):0}%`).join(' · ');
  $('#json').onclick=()=>download('json');$('#csv').onclick=()=>download('csv');$('#again').onclick=()=>{state.preChecks=[];state.postCheck=null;chooseStory();if(!state.calibrated||state.invalidated)showCalibrationIntro();else showValidationIntro();};$('#clear').onclick=reset;message('Your results are ready.');
+ bindCheckHistory();
  if(embeddedStudio||location.pathname==='/pilot/studio'){
   const resultsLink=embeddedStudio?'<button type="button" class="secondary" id="showSavedObservation">View saved summary ↓</button>':'<a class="text-link" href="/pilot/#eye-tracking">Open eye-tracking dashboard →</a>';
   $('#regions').insertAdjacentHTML('afterend',`<div class="actions"><button class="solid" id="saveObservation">Save to dashboard</button>${resultsLink}</div><p class="fine">Saving replaces the previous shared summary. Export the session before closing the activity if you want to keep the full results.</p><p id="observationStatus" role="status"></p>`);
@@ -414,18 +509,28 @@ function renderReview(){
  }
 }
 function drawHeatmap(){const c=$('#heatmap'),r=state.activityRect;c.width=r.width;c.height=r.height;const ctx=c.getContext('2d');for(const s of state.samples){if(!s.valid||s.activity_x<0||s.activity_x>r.width||s.activity_y<0||s.activity_y>r.height)continue;const x=s.activity_x,y=s.activity_y;const g=ctx.createRadialGradient(x,y,0,x,y,32);g.addColorStop(0,'rgba(201,86,50,.08)');g.addColorStop(.5,'rgba(219,153,61,.035)');g.addColorStop(1,'rgba(219,153,61,0)');ctx.fillStyle=g;ctx.fillRect(x-32,y-32,64,64);}}
-function sessionReport(){return{schema:'faraday.observatory.v3',exportedAt:new Date().toISOString(),mode:state.mode,nonclinical:true,quality:sessionQuality(),gazeFilter:state.mode==='camera'?gazeFilter:null,thresholds:R.limits,samplingDefinitions:{available:'Recent prediction (age <250ms), stable visible face and acceptable position; may repeat a callback ID.',valid:'Independent prediction ID selected once; used for spatial density and raw accuracy samples.',coverage:'Available slots divided by scheduled slots; scheduler gaps remain unavailable.'},story:state.story,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validationHistory:state.validationHistory,preChecks:state.preChecks,lastPreCheck:state.validation,postCheck:state.postCheck,positionInvalidated:state.invalidated,interruptions:state.interruptions,duration_ms:Math.round(state.elapsed),sampleIntervalTarget_ms:50,freshSignalCoverage:coverage(),viewport:state.viewport,activityRect:state.activityRect,regions:state.regions,samples:state.samples,limitations:'Engineering heuristics for adult exploratory use. No clinical, attention, fixation, or comprehension inference. Face movement proxy is not a calibrated head pose. Repeated predictions may indicate fresh signal availability, but are excluded from accuracy samples and heatmap density.'};}
+function sessionReport(){return{schema:'faraday.observatory.v3',exportedAt:new Date().toISOString(),mode:state.mode,nonclinical:true,quality:sessionQuality(),gazeFilter:state.mode==='camera'?gazeFilter:null,thresholds:R.limits,samplingDefinitions:{available:'Recent prediction (age <250ms), stable visible face and acceptable position; may repeat a callback ID.',valid:'Independent prediction ID selected once; used for spatial density and raw accuracy samples.',coverage:'Available slots divided by scheduled slots; scheduler gaps remain unavailable.'},story:state.story,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validationHistory:state.validationHistory.filter(check=>check.mode===state.mode),preChecks:state.preChecks,lastPreCheck:state.validation,postCheck:state.postCheck,positionInvalidated:state.invalidated,interruptions:state.interruptions,duration_ms:Math.round(state.elapsed),sampleIntervalTarget_ms:50,freshSignalCoverage:coverage(),viewport:state.viewport,activityRect:state.activityRect,regions:state.regions,samples:state.samples,limitations:'Engineering heuristics for adult exploratory use. No clinical, attention, fixation, or comprehension inference. Face movement proxy is not a calibrated head pose. Repeated predictions may indicate fresh signal availability, but are excluded from accuracy samples and heatmap density.'};}
 function exportContent(type){const report=sessionReport(),keys=['t_ms','prediction_id','prediction_age_ms','x','y','valid','available','reason','offscreen','activity_x','activity_y','region','raw_x','raw_y'];return type==='json'?JSON.stringify(report,null,2):['mode,quality,story_id,'+keys.join(','),...state.samples.map(s=>[state.mode,report.quality,state.story.id,...keys.map(k=>s[k]??'')].join(','))].join('\n');}
 function saveFile(content,mime,filename){const url=URL.createObjectURL(new Blob([content],{type:mime}));const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function download(type){saveFile(exportContent(type),type==='json'?'application/json':'text/csv',`faraday-${state.mode}-${state.story.id}-${Date.now()}.${type}`);}
 function cancelTargets(){hideCalibrationControls();collecting=false;activeValidation=null;$('#overlay').hidden=true;if(state.quickPreview||state.phase==='calibration')showCalibrationIntro();else if(checkPurpose==='post'&&state.phase==='postcheck'){state.postCheck=null;renderReview();}else showValidationIntro();}
 $('#cancelTarget').onclick=cancelTargets;
-function reset(){hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;clearGazeWindow();window.webgazer?.getRegression()[0]?.init();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',quickPreview:false,latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],calibrationLog:[],calibrationPoses:[],calibrationModel:null,activityRect:null,regions:[],viewport:null,validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='Choose a way to start';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('Camera disconnected.');}
+function reset(clearTrial=false){
+ hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;clearGazeWindow();
+ window.webgazer?.getRegression()[0]?.init();stopCamera();window.webgazer=undefined;trackerPromise=null;
+ Object.assign(state,{mode:null,phase:'setup',quickPreview:false,latest:null,face:null,pose:null,baseline:null,
+  calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,
+  interruptions:[],calibrationLog:[],calibrationPoses:[],calibrationModel:null,activityRect:null,regions:[],viewport:null});
+ if(clearTrial===true){state.reading=sampleReading;state.validationHistory=[];state.calibrationAttempt=0;}
+ $('#overlay').hidden=true;$('#modeBadge').textContent='Choose a way to start';$('#source').textContent='Not connected';
+ $('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';
+ setup();message('Camera disconnected.');
+}
 window.addEventListener('resize',()=>{if(!state.mode)return;const viewport=state.viewport;if(viewport?.width===innerWidth&&viewport.height===innerHeight&&viewport.dpr===devicePixelRatio)return;state.calibrated=false;if(state.phase==='review')return;state.invalidated=true;state.preChecks=[];collecting=false;activeValidation=null;$('#overlay').hidden=true;$('#calStatus').textContent='Window changed';if(['postcheck','post-intro'].includes(state.phase)){state.postCheck=null;renderReview();}else if(['recording','paused'].includes(state.phase)){state.running=false;finish();}else showCalibrationIntro();message('The window size changed. Start the nine dots again.');});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelReadingStart();if(!$('#overlay').hidden)cancelTargets();if(state.running)pauseRecording('Browser tab hidden');}});
 const studioNav=document.querySelectorAll('nav button[data-view]');
 studioNav.forEach(b=>b.onclick=()=>{cancelReadingStart();if(state.running)pauseRecording('Left observation studio');document.querySelectorAll('.view').forEach(v=>v.hidden=v.id!==b.dataset.view);studioNav.forEach(x=>x.classList.toggle('active',x===b));});
-if(embeddedStudio)window.addEventListener('faraday:close-studio',reset);
-window.addEventListener('pagehide',()=>{if(state.mode||cameraStarting)reset();});
+if(embeddedStudio)window.addEventListener('faraday:close-studio',()=>reset(true));
+window.addEventListener('pagehide',()=>{if(state.mode||cameraStarting||state.reading?.id==='pilot-reading'||state.validationHistory.length)reset(true);});
 setInterval(()=>{if(document.hidden)return;collectCalibration();collectValidation();},25);
 setup();requestAnimationFrame(tick);

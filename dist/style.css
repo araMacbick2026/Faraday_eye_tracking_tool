@@ -72,6 +72,21 @@
 .session-next p{margin:0 0 7px}
 .session-next p:last-child{margin:0}
 .review-downloads{margin-top:12px}
+.reading-material{padding:14px 16px;margin:16px 0;background:var(--panel);border:1px solid var(--line)}
+.reading-material p{margin:0 0 8px}
+#readingChoice{font:1.2rem Georgia,serif;color:var(--ink);overflow-wrap:anywhere}
+.reading-material summary{cursor:pointer;color:var(--green);font-weight:600}
+.reading-material details[open] summary{margin-bottom:12px}
+.reading-material form{display:grid;gap:10px;margin:16px 0 0;padding-top:12px;border-top:1px solid var(--line)}
+.reading-material h3{margin:0;font-size:1.1rem}
+.reading-material label{display:grid;gap:4px;font-size:.9rem}
+.reading-material small{margin-left:4px;color:var(--muted);font-weight:400}
+.reading-material input,.reading-material select,.reading-material textarea{width:100%;margin:0;padding:7px 9px;font:inherit;border:1px solid var(--field-line);border-radius:4px;background:var(--surface);color:var(--ink)}
+#readingMaterialStatus:empty{display:none}
+.activity-inner.activity-text-only{grid-template-columns:minmax(0,1fr)}
+.activity-inner article p:not(.eyebrow){white-space:pre-line;overflow-wrap:anywhere}
+.activity-inner h2,.diagram p{overflow-wrap:anywhere}
+.check-history-table{overflow-x:auto}
 @media(max-width:600px){.pilot-reading-intro{grid-template-columns:1fr}.pilot-studio .steps span{padding:10px 3px}.pilot .pilot-report-nav button{padding:8px}.pilot-studio .stats{gap:8px}}
 .pilot-studio{margin:18px 0 22px;scroll-margin-top:16px}
 .pilot-studio-header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px}

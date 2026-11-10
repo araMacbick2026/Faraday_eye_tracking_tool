@@ -297,3 +297,36 @@ assert.equal(replay.run('state.running'),true);
 console.log('PASS: known-position replay passed all 10 targets across two checks. Worst median '+
  Math.max(...testedTargets.map(target=>target.median)).toFixed(1)+' px, worst 90th percentile '+
  Math.max(...testedTargets.map(target=>target.p90)).toFixed(1)+' px. A 260 px injected miss was rejected and the passing run started reading.');
+
+const trial=environment();
+assert.equal(trial.get('#readingChoice').textContent,'A bridge made of paper');
+const material=trial.get('#readingMaterial');
+material.elements={title:{value:'=Practice passage'},passage:{value:'<script>plain text</script>\n\nA second paragraph.'},
+ note:{value:'Look for the fold.'},question:{value:'What changed?'}};
+material.onsubmit({preventDefault(){}});
+assert.equal(trial.get('#readingChoice').textContent,'=Practice passage');
+trial.run('chooseStory();chooseStory()');
+assert.equal(trial.run('state.story.id'),'pilot-reading');
+assert.match(trial.run('lesson()'),/&lt;script&gt;plain text&lt;\/script&gt;/);
+assert.doesNotMatch(trial.run('lesson()'),/<script>/);
+assert.match(trial.run('lesson()'),/Look for the fold\./);
+trial.run(`state.mode='camera';state.calibrationAttempt=1;
+ validationRows=checks.map((_,i)=>({point:i+1,slots:60,freshSlots:60,errors:Array(30).fill(i===4?250:30)}));
+ finishValidation()`);
+assert.match(trial.get('#desk').innerHTML,/Compare accuracy checks \(1\)/);
+assert.match(trial.get('#desk').innerHTML,/Did not pass/);
+trial.run(`state.calibrationAttempt=2;
+ validationRows=checks.map((_,i)=>({point:i+1,slots:60,freshSlots:60,errors:Array(30).fill(30)}));
+ finishValidation()`);
+assert.match(trial.get('#desk').innerHTML,/Compare accuracy checks \(2\)/);
+const exportedChecks=trial.run('checkHistoryCsv()').split('\r\n');
+assert.equal(exportedChecks.length,3);
+assert.match(exportedChecks[1],/"'=Practice passage","1".*"Did not pass"/);
+assert.match(exportedChecks[2],/"'=Practice passage","2".*"Passed"/);
+trial.run('reset()');
+assert.equal(trial.get('#readingChoice').textContent,'=Practice passage');
+assert.match(trial.get('#desk').innerHTML,/Compare accuracy checks \(2\)/);
+trial.run('reset(true)');
+assert.equal(trial.get('#readingChoice').textContent,'A bridge made of paper');
+assert.doesNotMatch(trial.get('#desk').innerHTML,/Compare accuracy checks/);
+console.log('PASS: a custom passage stays fixed across trials and camera restarts, exports both outcomes safely, and is cleared when the activity closes.');
