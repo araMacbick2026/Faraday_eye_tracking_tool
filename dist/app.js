@@ -2,7 +2,7 @@
 const $=s=>document.querySelector(s);
 const embeddedStudio=document.body?.classList.contains('pilot');
 const state={mode:null,phase:'setup',quickPreview:false,latest:null,calibrated:false,validation:null,samples:[],elapsed:0,running:false,epoch:0,viewport:null};
-let validationRows=[],activeValidation=null,calIndex=0,lastTick=0;
+let validationRows=[],validationPoses=[],checkPose,activeValidation=null,calIndex=0,lastTick=0,readingStartDeadline=0;
 const calibration=[[.1,.18],[.5,.18],[.9,.18],[.1,.5],[.5,.5],[.9,.5],[.1,.82],[.5,.82],[.9,.82]];
 const checks=[[.25,.3],[.75,.3],[.5,.55],[.25,.72],[.75,.72]];
 const previewCalibration=[[.12,.52],[.45,.52],[.88,.52]];
@@ -11,7 +11,7 @@ const samplesPerTarget=15;
 const calibrationCapacity=(calibration.length+3)*samplesPerTarget;
 const quantile=(a,q)=>{if(!a.length)return null;const s=[...a].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor((s.length-1)*q))]};
 const fmt=n=>n==null?'—':Math.round(n)+' px';
-function phase(p,n){state.phase=p;document.querySelectorAll('.steps span').forEach((s,i)=>{const active=i===n-1;s.classList.toggle('selected',active);if(active)s.setAttribute('aria-current','step');else s.removeAttribute('aria-current');});}
+function phase(p,n){readingStartDeadline=0;state.phase=p;document.querySelectorAll('.steps span').forEach((s,i)=>{const active=i===n-1;s.classList.toggle('selected',active);if(active)s.setAttribute('aria-current','step');else s.removeAttribute('aria-current');});}
 function message(s){$('#signal').textContent=s;}
 function setDesk(html){$('#desk').innerHTML=html;}
 function setup(){phase('setup',1);setDesk(`<div class="welcome"><div class="eyebrow">Before you begin</div><h2>How would you like to start?</h2><p>Use your webcam to estimate where you look, or use your pointer to try the activity.</p><label class="consent"><input id="consent" type="checkbox"><span>I agree to use my camera for this activity. Video stays in this browser and is never recorded.</span></label><div class="actions"><button class="solid" id="camera" disabled>Use my camera</button><button class="secondary" id="rehearse">Practise with pointer</button></div><p class="small-note">About 5 minutes · For adults using a desktop or laptop</p><div id="error" role="status"></div></div>`);$('#consent').onchange=e=>$('#camera').disabled=!e.target.checked;$('#camera').onclick=startCamera;$('#rehearse').onclick=()=>startMode('pointer');}
@@ -127,6 +127,7 @@ function installFaceMonitor(){
 }
 function faceReady(){return state.mode==='pointer'||!!(state.face&&now()-state.face.t<600&&now()-state.stableSince>=600);}
 function headMoved(){return state.mode==='camera'&&state.face&&state.baseline&&R.positionChanged(state.baseline,state.face);}
+function medianPose(poses){return Object.fromEntries(['x','y','scale'].map(key=>[key,R.q(poses.map(pose=>pose[key]),.5)]));}
 function startMode(mode){if(mode==='pointer')stopCamera();state.mode=mode;clearGazeWindow();state.preChecks=[];state.invalidated=false;$('#modeBadge').textContent=mode==='camera'?'Camera':'Pointer practice';$('#source').textContent=mode==='camera'?'Webcam estimate':'Pointer (not gaze)';showCalibrationIntro();}
 document.addEventListener('pointermove',e=>{if(state.mode==='pointer')state.latest={x:e.clientX,y:e.clientY,t:now(),id:++state.sequence};});
 function pointerPrediction(){const p=state.latest;return p?{...p,t:now(),id:++state.sequence}:null;}
@@ -227,16 +228,17 @@ function finishCalibration(){
   state.calibrationModel={name:model.name,source:model.source,samples:model.sampleCount,heldOutMeanPx:model.calibrationError};
  }
  state.calibrated=true;
- if(state.calibrationPoses.length)state.baseline=Object.fromEntries(['x','y','scale'].map(key=>[key,R.q(state.calibrationPoses.map(pose=>pose[key]),.5)]));
+ if(state.calibrationPoses.length)state.baseline=medianPose(state.calibrationPoses);
  $('#calStatus').textContent=refining?'Adjusted':'Complete';
  showValidationIntro();
 }
 function showValidationIntro(){phase('validation',3);setDesk(`<div class="welcome"><div class="eyebrow">Step 3 · Check accuracy</div><h2>${state.mode==='pointer'?'Move your pointer to each dot':'Follow the dots with your eyes'}</h2><p>${state.mode==='pointer'?'Keep your pointer at the centre of each dot until it moves.':'Look at the centre of each dot until it moves.'} There are five dots per check.</p><p>Two checks need to pass before you can read with the camera.</p><div class="actions"><button class="solid" id="validate">Start check ${state.preChecks.length+1} of 2</button><button class="secondary" id="recalibrate">Recalibrate</button></div></div>`);$('#validate').onclick=()=>beginValidation('pre');$('#recalibrate').onclick=showCalibrationIntro;}
-function beginValidation(purpose='pre'){hideCalibrationControls();checkPurpose=purpose;validationRows=[];checkIndex=0;phase(purpose==='post'?'postcheck':'validation',purpose==='post'?5:3);$('#overlay').hidden=false;$('#target').disabled=true;$('#target').textContent='·';$('#target').onclick=null;startCheckTarget();}
+function beginValidation(purpose='pre'){hideCalibrationControls();checkPurpose=purpose;validationRows=[];validationPoses=[];checkIndex=0;phase(purpose==='post'?'postcheck':'validation',purpose==='post'?5:3);$('#overlay').hidden=false;$('#target').disabled=true;$('#target').textContent='·';$('#target').onclick=null;startCheckTarget();}
 function startCheckTarget(){
  const points=checkPurpose==='preview'?previewChecks:checks;
  if(checkIndex===points.length){activeValidation=null;$('#overlay').hidden=true;finishValidation();return;}
  if(state.mode==='camera')clearGazeWindow();
+ checkPose=null;
  const pt=points[checkIndex];placeTarget(pt);checkStarted=now();checkLastSlot=-1;checkLastId=0;
  activeValidation={point:checkIndex+1,target:{x:pt[0]*innerWidth,y:pt[1]*innerHeight},errors:[],offsets:[],slots:60,freshSlots:0,uniquePredictions:[],missing:0};
  $('#targetInstruction').textContent=`${checkPurpose==='preview'?'Quick preview':checkPurpose==='post'?'After-activity check':'Accuracy check '+(state.preChecks.length+1)+'/2'} · Dot ${checkIndex+1} of ${points.length}`;
@@ -244,10 +246,14 @@ function startCheckTarget(){
 }
 function collectValidation(){
  if(!activeValidation||$('#overlay').hidden)return;
- const elapsed=now()-checkStarted;if(elapsed>=4000){activeValidation.missing=60-activeValidation.freshSlots;validationRows.push(activeValidation);activeValidation=null;checkIndex++;startCheckTarget();return;}
+ const elapsed=now()-checkStarted;if(elapsed>=4000){activeValidation.missing=60-activeValidation.freshSlots;validationRows.push(activeValidation);if(checkPose)validationPoses.push(checkPose);activeValidation=null;checkIndex++;startCheckTarget();return;}
  if(elapsed<1000)return;
  const slot=Math.min(59,Math.floor((elapsed-1000)/50));if(slot===checkLastSlot)return;checkLastSlot=slot;
- const p=fresh();if(p&&faceReady())activeValidation.freshSlots++;if(p&&p.id!==checkLastId&&faceReady()){checkLastId=p.id;activeValidation.errors.push(Math.hypot(p.x-activeValidation.target.x,p.y-activeValidation.target.y));activeValidation.offsets.push({x:p.x-activeValidation.target.x,y:p.y-activeValidation.target.y,...(p.rawX===undefined?{}:{rawX:p.rawX-activeValidation.target.x,rawY:p.rawY-activeValidation.target.y})});activeValidation.uniquePredictions.push(p.id);}
+ const p=fresh();if(p&&faceReady())activeValidation.freshSlots++;if(p&&p.id!==checkLastId&&faceReady()){checkLastId=p.id;activeValidation.errors.push(Math.hypot(p.x-activeValidation.target.x,p.y-activeValidation.target.y));activeValidation.offsets.push({x:p.x-activeValidation.target.x,y:p.y-activeValidation.target.y,...(p.rawX===undefined?{}:{rawX:p.rawX-activeValidation.target.x,rawY:p.rawY-activeValidation.target.y})});activeValidation.uniquePredictions.push(p.id);
+  if(state.mode==='camera'&&checkPurpose==='pre'&&[state.face.x,state.face.y,state.face.scale].every(Number.isFinite)){
+   const {x,y,scale}=state.face;checkPose={x,y,scale};
+  }
+ }
  $('#targetProgress').textContent=`${Math.ceil((4000-elapsed)/1000)} seconds left · Keep looking at the dot`;
 }
 function checkTable(v){return `<table class="quality-table"><thead><tr><th>Target</th><th>Typical distance</th><th>90% of readings within</th><th>Tracking time</th><th>Readings per second</th><th>Result</th></tr></thead><tbody>${v.targets.map(r=>`<tr><td>${r.point}</td><td>${fmt(r.median)}</td><td>${fmt(r.p90)}</td><td>${Math.round(r.coverage*100)}%</td><td>${r.predictionsPerSecond.toFixed(1)}</td><td>${r.pass?'Pass':'Repeat'}</td></tr>`).join('')}</tbody></table>`;}
@@ -266,7 +272,10 @@ function finishValidation(){
  if(checkPurpose==='preview'){showPreviewResult(R.summarize(validationRows,previewChecks.length));return;}
  const result={...R.summarize(validationRows,checks.length),purpose:checkPurpose,mode:state.mode,checkedAt:new Date().toISOString(),viewport:state.viewport};state.validationHistory.push(result);
  if(checkPurpose==='post'){state.postCheck=result;renderReview();return;}
- if(result.pass)state.preChecks.push(result);else state.preChecks=[];
+ if(result.pass){
+  state.preChecks.push(result);
+  if(state.preChecks.length>=2&&validationPoses.length===checks.length)state.baseline=medianPose(validationPoses);
+ }else state.preChecks=[];
  state.validation=result;$('#accuracy').textContent=fmt(result.median);phase('validated',3);
  const ready=state.preChecks.length>=2;
  const restartCalibration=state.mode==='camera'&&R.widespreadPositionError(result);
@@ -283,7 +292,7 @@ function finishValidation(){
   ${!result.pass?`<button class="secondary" id="demoContinue">${state.mode==='camera'?'Practise with pointer':'Read a practice story'}</button>`:''}</div>
   <details class="accuracy-details"><summary>See results for each target</summary>${checkTable(result)}${targetMap(result)}
   <button class="secondary" id="exportValidation">Download check results</button></details></div>`);
- if(result.pass)$('#nextCheck').onclick=ready?()=>showActivity(true):()=>beginValidation('pre');
+ if(result.pass)$('#nextCheck').onclick=ready?()=>showActivity():()=>beginValidation('pre');
  $('#recalibrate').onclick=showCalibrationIntro;$('#exportValidation').onclick=downloadValidation;
  if(canRefine)$('#refine').onclick=beginRefinement;
  if(!result.pass&&!restartCalibration)$('#retryCheck').onclick=()=>beginValidation('pre');
@@ -295,14 +304,30 @@ function lesson(){const s=state.story;return `<div class="activity" id="activity
 function showActivity(randomize=false){
  if(state.mode==='camera'&&(!state.calibrated||state.preChecks.length<2||state.invalidated)){showCalibrationIntro();return;}
  if(randomize||!state.story)chooseStory();phase('ready',4);
- setDesk(`<div class="actions"><button class="solid" id="start">Start reading</button><button class="secondary" id="shuffle">Choose another story</button><button class="secondary" id="redo">Recheck accuracy</button></div><p class="small-note">Story ${window.STORIES.findIndex(s=>s.id===state.story.id)+1} OF ${window.STORIES.length}</p>${lesson()}<p class="small-note">Read at your own pace. We’ll check accuracy again when you finish.</p>`);
+ setDesk(`<div class="actions"><button class="solid" id="start">Start reading</button><button class="secondary" id="shuffle">Choose another story</button><button class="secondary" id="redo">Recheck accuracy</button></div><p id="readingStartStatus" role="status" hidden></p><p class="small-note">Story ${window.STORIES.findIndex(s=>s.id===state.story.id)+1} OF ${window.STORIES.length}</p>${lesson()}<p class="small-note">Read at your own pace. We’ll check accuracy again when you finish.</p>`);
  $('#start').onclick=startRecording;$('#shuffle').onclick=()=>showActivity(true);$('#redo').onclick=()=>{state.preChecks=[];showValidationIntro();};
 }
 function rectJSON(r){return{x:r.x,y:r.y,width:r.width,height:r.height};}
 function inside(p,r){return p.x>=r.x&&p.x<=r.x+r.width&&p.y>=r.y&&p.y<=r.y+r.height;}
 function captureLayout(){state.activityRect=rectJSON($('#activity').getBoundingClientRect());state.regions=[...document.querySelectorAll('#activity [data-region]')].map(e=>({name:e.dataset.region,rect:rectJSON(e.getBoundingClientRect())}));}
+function readingStartStatus(text){const status=$('#readingStartStatus');status.hidden=!text;status.textContent=text;}
+function cancelReadingStart(text=''){
+ if(!readingStartDeadline)return;
+ readingStartDeadline=0;$('#start').disabled=false;readingStartStatus(text);
+}
+function readyToRead(){return faceReady()&&!headMoved()&&!!fresh();}
 function startRecording(){
- if(state.mode==='camera'&&(!state.calibrated||state.invalidated||state.preChecks.length<2||!faceReady()||headMoved())){showCalibrationIntro();message('○ Face not steady or position changed · recalibrate');return;}
+ if(state.mode==='camera'){
+  if(!state.calibrated||state.invalidated){showCalibrationIntro();return;}
+  if(state.preChecks.length<2){showValidationIntro();return;}
+  if(!readyToRead()){
+   readingStartDeadline=now()+3000;
+   $('#start').disabled=true;
+   readingStartStatus('Hold your position and look at the story. Reading will start when the camera is ready.');
+   return;
+  }
+ }
+ readingStartStatus('');
  if(state.mode==='camera')clearGazeWindow();
  state.samples=[];state.elapsed=0;state.postCheck=null;state.interruptions=[];state.invalidated=false;state.lastPredictionId=0;recordNext=50;badSince=0;movementSince=0;
  $('#activity').scrollIntoView({block:'center'});captureLayout();state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};
@@ -317,6 +342,11 @@ function addRecordingSlot(t,forceMissing=false){
  state.samples.push({t_ms:t,available,prediction_id:valid?p.id:null,prediction_age_ms:p?Math.round(now()-p.t):null,x:valid?Math.round(p.x):null,y:valid?Math.round(p.y):null,raw_x:valid?p.rawX??null:null,raw_y:valid?p.rawY??null:null,valid,reason:valid?'fresh':forceMissing?'scheduler-gap':!p?'missing-or-stale':p.id===state.lastPredictionId?'repeated-prediction':'face-or-position',offscreen:valid&&(p.x<0||p.x>innerWidth||p.y<0||p.y>innerHeight),activity_x:valid?p.x-state.activityRect.x:null,activity_y:valid?p.y-state.activityRect.y:null,region:valid?state.regions.find(r=>inside(p,r.rect))?.name||'outside activity':'missing'});
 }
 function tick(time){
+ if(readingStartDeadline){
+  if(time>=readingStartDeadline||document.hidden){
+   cancelReadingStart(headMoved()?'Return to the position you used for the checks, or choose Recheck accuracy to read from here.':'Keep your face in view and select Start reading again.');
+  }else if(readyToRead())startRecording();
+ }
  if(state.running){const dt=Math.max(0,time-lastTick);state.elapsed=Math.min(45000,state.elapsed+dt);
   if(recordNext<=state.elapsed)captureLayout();
   while(recordNext<=state.elapsed){addRecordingSlot(recordNext,state.elapsed-recordNext>=50);recordNext+=50;}
@@ -391,10 +421,10 @@ function download(type){saveFile(exportContent(type),type==='json'?'application/
 function cancelTargets(){hideCalibrationControls();collecting=false;activeValidation=null;$('#overlay').hidden=true;if(state.quickPreview||state.phase==='calibration')showCalibrationIntro();else if(checkPurpose==='post'&&state.phase==='postcheck'){state.postCheck=null;renderReview();}else showValidationIntro();}
 $('#cancelTarget').onclick=cancelTargets;
 function reset(){hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;clearGazeWindow();window.webgazer?.getRegression()[0]?.init();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',quickPreview:false,latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],calibrationLog:[],calibrationPoses:[],calibrationModel:null,activityRect:null,regions:[],viewport:null,validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='Choose a way to start';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('Camera disconnected.');}
-window.addEventListener('resize',()=>{if(!state.mode)return;state.calibrated=false;if(state.phase==='review')return;state.invalidated=true;state.preChecks=[];collecting=false;activeValidation=null;$('#overlay').hidden=true;$('#calStatus').textContent='Window changed';if(['postcheck','post-intro'].includes(state.phase)){state.postCheck=null;renderReview();}else if(['recording','paused'].includes(state.phase)){state.running=false;finish();}else showCalibrationIntro();message('The window size changed. Start the nine dots again.');});
-document.addEventListener('visibilitychange',()=>{if(document.hidden){if(!$('#overlay').hidden)cancelTargets();if(state.running)pauseRecording('Browser tab hidden');}});
+window.addEventListener('resize',()=>{if(!state.mode)return;const viewport=state.viewport;if(viewport?.width===innerWidth&&viewport.height===innerHeight&&viewport.dpr===devicePixelRatio)return;state.calibrated=false;if(state.phase==='review')return;state.invalidated=true;state.preChecks=[];collecting=false;activeValidation=null;$('#overlay').hidden=true;$('#calStatus').textContent='Window changed';if(['postcheck','post-intro'].includes(state.phase)){state.postCheck=null;renderReview();}else if(['recording','paused'].includes(state.phase)){state.running=false;finish();}else showCalibrationIntro();message('The window size changed. Start the nine dots again.');});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){cancelReadingStart();if(!$('#overlay').hidden)cancelTargets();if(state.running)pauseRecording('Browser tab hidden');}});
 const studioNav=document.querySelectorAll('nav button[data-view]');
-studioNav.forEach(b=>b.onclick=()=>{if(state.running)pauseRecording('Left observation studio');document.querySelectorAll('.view').forEach(v=>v.hidden=v.id!==b.dataset.view);studioNav.forEach(x=>x.classList.toggle('active',x===b));});
+studioNav.forEach(b=>b.onclick=()=>{cancelReadingStart();if(state.running)pauseRecording('Left observation studio');document.querySelectorAll('.view').forEach(v=>v.hidden=v.id!==b.dataset.view);studioNav.forEach(x=>x.classList.toggle('active',x===b));});
 if(embeddedStudio)window.addEventListener('faraday:close-studio',reset);
 window.addEventListener('pagehide',()=>{if(state.mode||cameraStarting)reset();});
 setInterval(()=>{if(document.hidden)return;collectCalibration();collectValidation();},25);

@@ -218,3 +218,82 @@ assert.equal(filtered.run('state.latest'),null,'Each target starts with a fresh 
 filtered.run('state.face={id:6,t:now()};ingest({x:60,y:80})');
 assert.equal(filtered.run('state.latest.x'),60);
 console.log('PASS: the two-pass, three-miss pattern gets targeted calibration, and brief spikes are filtered without carrying points across targets.');
+
+const reading=environment();
+reading.run("state.mode='camera';state.calibrated=true;state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};state.preChecks=[{pass:true},{pass:true}];state.baseline={x:.5,y:.5,scale:.2};showActivity()");
+const storyId=reading.run('state.story.id');
+reading.events.resize();
+assert.equal(reading.run('state.calibrated'),true,'An unchanged viewport does not clear calibration');
+reading.get('#start').onclick();
+assert.equal(reading.run('state.phase'),'ready');
+assert.equal(reading.run('state.preChecks.length'),2);
+assert.match(reading.get('#readingStartStatus').textContent,/start when the camera is ready/);
+reading.advance(700);
+reading.run('state.face={x:.5,y:.5,scale:.2,t:now(),id:7};state.stableSince=0;ingest({x:400,y:300});tick(now())');
+assert.equal(reading.run('state.running'),true);
+assert.equal(reading.run('state.story.id'),storyId);
+assert.equal(reading.run('state.preChecks.length'),2);
+
+const shifted=environment();
+shifted.run("state.mode='camera';state.calibrated=true;state.preChecks=[{pass:true},{pass:true}];state.baseline={x:.5,y:.5,scale:.2};showActivity();state.face={x:.8,y:.5,scale:.2,t:now(),id:1};ingest({x:400,y:300})");
+shifted.get('#start').onclick();
+shifted.advance(3100);
+shifted.run('state.face.t=now();tick(now())');
+assert.equal(shifted.run('state.phase'),'ready');
+assert.equal(shifted.run('state.running'),false);
+assert.equal(shifted.get('#start').disabled,false);
+assert.match(shifted.get('#readingStartStatus').textContent,/Recheck accuracy/);
+assert.equal(shifted.run('state.preChecks.length'),2);
+shifted.run(`state.preChecks=[{pass:true}];
+ validationPoses=[.48,.49,.5,.51,.8].map(x=>({x,y:.5,scale:.2}));
+ validationRows=checks.map((_,i)=>({point:i+1,slots:60,freshSlots:60,errors:Array(30).fill(20)}));
+ finishValidation()`);
+assert.equal(shifted.run('state.baseline.x'),.5,'The reading position comes from the passing check, without overreacting to one dot');
+console.log('PASS: a brief loss waits on the story, a position change offers recheck, and neither clears passing checks.');
+
+// Replay known gaze positions through the fitted model and the same checks used by the webcam activity.
+const replay=environment();await replay.run('startCamera()');replay.run('beginCalibration()');
+let replayFrame=0;
+for(let point=0;point<9;point++){
+ replay.run('clickCalibration()');replay.advance(800);
+ for(let frame=0;frame<15;frame++){
+  replay.advance(140);
+  replay.run(`{
+   state.face={x:.5,y:.5,scale:.2,t:now(),id:${++replayFrame},patches:{features:currentCalibrationPoint()}};
+   state.stableSince=0;collectCalibration();
+  }`);
+ }
+}
+function replayCheck(biasAtLastTarget=0){
+ replay.run("beginValidation('pre')");
+ for(let point=0;point<5;point++){
+  for(let slot=0;slot<60;slot++){
+   replay.advance(slot===0?1000:50);
+   const horizontalNoise=(slot%7-3)*3+(point===4?biasAtLastTarget:0);
+   const verticalNoise=(slot%5-2)*4;
+   replay.run(`{
+    const {x,y}=activeValidation.target;
+    state.face={x:.5,y:.5,scale:.2,t:now(),id:${++replayFrame}};
+    const estimate=webgazer.getRegression()[0].predict({features:[(x+${horizontalNoise})/innerWidth,(y+${verticalNoise})/innerHeight]});
+    ingest(estimate);collectValidation();
+   }`);
+  }
+  replay.advance(50);replay.run('collectValidation()');
+ }
+ return replay.run('state.validation');
+}
+const rejected=replayCheck(260);
+assert.equal(rejected.pass,false);
+assert.ok(rejected.targets[4].median>240,'A known 260 px error should be measured as a large miss');
+assert.equal(replay.run('state.preChecks.length'),0);
+const accepted=[replayCheck(),replayCheck()];
+const testedTargets=accepted.flatMap(check=>check.targets);
+assert.ok(accepted.every(check=>check.pass));
+assert.ok(testedTargets.every(target=>target.median<20&&target.p90<30&&target.coverage===1));
+assert.equal(replay.stats().training,135,'Held-out targets never feed the calibration model');
+replay.get('#nextCheck').onclick();
+replay.get('#start').onclick();
+assert.equal(replay.run('state.running'),true);
+console.log('PASS: known-position replay passed all 10 targets across two checks. Worst median '+
+ Math.max(...testedTargets.map(target=>target.median)).toFixed(1)+' px, worst 90th percentile '+
+ Math.max(...testedTargets.map(target=>target.p90)).toFixed(1)+' px. A 260 px injected miss was rejected and the passing run started reading.');

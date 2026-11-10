@@ -285,7 +285,7 @@ openStudio.addEventListener('click', async () => {
   studioStatus.textContent = 'Loading the observation desk…';
   try {
     studioLoad ??= Promise.all([import('/reliability.js?v=12'), import('/stories.js?v=7'), import('/gaze-model.js?v=3')])
-      .then(() => import('/app.js?v=16'));
+      .then(() => import('/app.js?v=17'));
     await studioLoad;
     if (!studio.hidden) {
       studioStatus.textContent = '';
