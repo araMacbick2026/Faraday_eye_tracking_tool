@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Faraday | Athlete Pilot</title>
-  <link rel="stylesheet" href="/style.css?v=11">
-  <script type="module" src="/pilot.js?v=17"></script>
+  <link rel="stylesheet" href="/style.css?v=12">
+  <script type="module" src="/pilot.js?v=18"></script>
 </head>
 <body class="pilot">
   <main class="pilot-main">
@@ -71,13 +71,32 @@
       <section id="pilot-eye-tracking" aria-labelledby="pilot-eye-title" hidden>
         <div class="pilot-report-heading">
           <div><p class="eyebrow">LEARNING OBSERVATORY</p><h2 id="pilot-eye-title">Eye tracking</h2>
-          <p>Run a guided reading activity with a webcam or rehearse with the pointer.</p></div>
-          <a class="pilot-launch" href="/pilot/studio">Open eye-tracking studio →</a>
+          <p>Run a guided reading activity and review the session here.</p></div>
+          <button id="pilot-open-studio" type="button" aria-controls="pilot-studio" aria-expanded="false">Start an activity →</button>
         </div>
-        <article class="pilot-card">
-          <h3>Latest saved observation</h3>
+        <p id="pilot-studio-status" role="status"></p>
+        <section id="pilot-studio" class="pilot-studio" aria-labelledby="pilot-studio-title" tabindex="-1" hidden>
+          <div class="pilot-studio-header"><h3 id="pilot-studio-title">Observation desk</h3><button id="pilot-close-studio" type="button" class="secondary">Close activity</button></div>
+          <div class="steps" aria-label="Activity steps"><span>01 <b>Set up</b></span><span>02 <b>Calibrate</b></span><span>03 <b>Check accuracy</b></span><span>04 <b>Read</b></span><span>05 <b>Review</b></span></div>
+          <div class="workspace">
+            <div class="primary"><div class="panel-label"><span>GUIDED READING SESSION</span><span id="modeBadge">NO SESSION</span></div><div id="desk"></div></div>
+            <div class="rail">
+              <div class="eyebrow">LIVE SESSION</div>
+              <div class="readout"><span>Input</span><b id="source">Not connected</b></div>
+              <div class="readout"><span>Calibration</span><b id="calStatus">Not started</b></div>
+              <div class="readout"><span>Median error</span><b id="accuracy">—</b></div>
+              <div class="readout"><span>Samples</span><b id="sampleCount">0</b></div>
+              <div id="signal" class="signal">Waiting for a session</div>
+            </div>
+          </div>
+          <div id="overlay" hidden><div class="overlay-top"><span id="targetInstruction"></span><button id="cancelTarget" type="button">Cancel</button></div><div id="targetProgress"></div><button id="target" type="button" aria-label="Calibration target">+</button></div>
+          <div id="gazeDot" hidden></div>
+        </section>
+        <article id="pilot-observation-card" class="pilot-card" tabindex="-1" aria-labelledby="pilot-saved-title">
+          <p class="eyebrow">SHARED WITH COACH AND ATHLETE</p>
+          <h3 id="pilot-saved-title">Latest saved observation</h3>
           <div id="pilot-observation-summary"></div>
-          <p class="pilot-detail">Coach and athlete share this summary. The full review, heatmap, and raw exports are in the studio during the session.</p>
+          <p class="pilot-detail">The heatmap and raw exports are available in the activity review before you close it.</p>
         </article>
         <p class="pilot-detail">Exploratory adult testing. Gaze estimates do not measure attention, comprehension, or athletic performance.</p>
       </section>

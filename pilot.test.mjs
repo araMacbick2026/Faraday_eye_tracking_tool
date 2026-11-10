@@ -168,7 +168,11 @@ test('hosted demo starts at sign-in and loads sample data without exposing PINs'
       if (role === 'coach') {
         assert.equal(data.observation, null);
         assert.equal((await app.request('/pilot/api/observations', post({ ...summary, coverage: 101 }, cookie))).status, 400);
-        assert.equal((await app.request('/pilot/api/observations', post({ ...summary, samples: [{ x: 123, y: 321 }] }, cookie))).status, 201);
+        const saved = await app.request('/pilot/api/observations', post({ ...summary, samples: [{ x: 123, y: 321 }] }, cookie));
+        assert.equal(saved.status, 201);
+        const { savedAt, ...observation } = (await saved.json()).observation;
+        assert.ok(Date.parse(savedAt));
+        assert.deepEqual(observation, { ...summary, savedBy: 'coach' });
       } else if (role === 'athlete') {
         const { savedAt, ...observation } = data.observation;
         assert.ok(Date.parse(savedAt));

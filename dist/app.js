@@ -1,5 +1,6 @@
 'use strict';
 const $=s=>document.querySelector(s);
+const embeddedStudio=document.body?.classList.contains('pilot');
 const state={mode:null,phase:'setup',latest:null,calibrated:false,validation:null,samples:[],started:0,elapsed:0,running:false,raf:0,epoch:0,viewport:null};
 let targetTimer,validationRows=[],activeValidation=null,calIndex=0,calClicks=0,lastSample=0,lastTick=0;
 const calibration=[[.1,.18],[.5,.18],[.9,.18],[.1,.5],[.5,.5],[.9,.5],[.1,.82],[.5,.82],[.9,.82]];
@@ -10,7 +11,7 @@ function phase(p,n){state.phase=p;document.querySelectorAll('.steps span').forEa
 function message(s){$('#signal').textContent=s;}
 function setDesk(html){$('#desk').innerHTML=html;}
 function setup(){phase('setup',1);setDesk(`<div class="welcome"><div class="eyebrow">EXPERIMENT NO. 001</div><h2>Where does a learner look?</h2><p>A short reading experiment, a simple webcam, and a transparent look at the quality of the signal.</p><label class="consent"><input id="consent" type="checkbox"><span>I agree to enable my camera for this exploratory demo. Camera frames are processed locally and video is never recorded. Raw samples stay in your browser. Tracking assets load from this site.</span></label><div class="actions"><button class="solid" id="camera" disabled>Connect camera ↗</button><button class="secondary" id="rehearse">Rehearse with pointer →</button></div><p class="small-note">ABOUT 5 MINUTES · DESKTOP RECOMMENDED · ADULT TESTING</p><div id="error" role="status"></div></div>`);$('#consent').onchange=e=>$('#camera').disabled=!e.target.checked;$('#camera').onclick=startCamera;$('#rehearse').onclick=()=>startMode('pointer');}
-let trackerPromise;
+let trackerPromise,cameraStarting=false;
 function timeoutError(stage){const e=new Error(stage+' timed out');e.name='TimeoutError';return e;}
 function withTimeout(promise,ms,stage){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(timeoutError(stage)),ms);})]).finally(()=>clearTimeout(timer));}
 function stopCamera(){
@@ -32,10 +33,12 @@ function cameraFailure(error,stage){
 function loadTracker(){
   if(window.webgazer)return Promise.resolve();
   if(trackerPromise)return trackerPromise;
-  trackerPromise=withTimeout(new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='vendor/webgazer.js';script.onload=resolve;script.onerror=()=>reject(new Error('Tracking library download failed'));document.head.append(script);}),20000,'tracking library').catch(error=>{trackerPromise=null;throw error;});
+  trackerPromise=withTimeout(new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/vendor/webgazer.js';script.onload=resolve;script.onerror=()=>reject(new Error('Tracking library download failed'));document.head.append(script);}),20000,'tracking library').catch(error=>{trackerPromise=null;throw error;});
   return trackerPromise;
 }
 async function startCamera(){
+  if(cameraStarting){$('#error').textContent='The previous camera request is still closing. Try again shortly.';return;}
+  cameraStarting=true;
   const epoch=++state.epoch;let stage='browser camera support';
   const button=$('#camera');button.disabled=true;button.textContent='Checking camera…';$('#rehearse').disabled=true;$('#error').textContent='';
   try{
@@ -45,8 +48,9 @@ async function startCamera(){
     stage='tracking library loading';await loadTracker();if(epoch!==state.epoch)return;
     // This WebGazer distribution uses a relative MediaPipe directory by default.
     // Ship the matching assets with the application and resolve from the page URL.
-    webgazer.params.faceMeshSolutionPath=new URL('mediapipe/face_mesh/',document.baseURI).href;
+    webgazer.params.faceMeshSolutionPath=new URL('/mediapipe/face_mesh/',document.baseURI).href;
     webgazer.saveDataAcrossSessions(false);await webgazer.setCameraConstraints({audio:false,video:{width:{ideal:640},height:{ideal:480},facingMode:'user'}});
+    if(epoch!==state.epoch)return;
     installFaceMonitor();webgazer.setRegression('ridge').setGazeListener(ingest);
     stage='camera permission and face-tracking initialization';button.textContent='Allow camera to continue…';$('#error').textContent='Allow camera access when prompted. Initializing the local tracking model can take a few seconds.';
     const startup=Promise.resolve(webgazer.begin());
@@ -59,8 +63,8 @@ async function startCamera(){
     state.epoch++;stopCamera();
     console.warn('Faraday camera startup:',stage,error?.name,error?.message);
     $('#error').textContent=cameraFailure(error,stage)+' You can still rehearse the workflow with the pointer.';
-    button.disabled=false;button.textContent='Reload & retry camera ↗';button.onclick=()=>location.reload();$('#rehearse').disabled=false;
-  }
+    button.disabled=false;button.textContent=embeddedStudio?'Reset camera setup':'Reload & retry camera ↗';button.onclick=embeddedStudio?reset:()=>location.reload();$('#rehearse').disabled=false;
+  }finally{cameraStarting=false;}
 }
 const R=window.Reliability;
 Object.assign(state,{sequence:0,frameSequence:0,face:null,stableSince:0,pose:null,baseline:null,preChecks:[],postCheck:null,story:null,invalidated:false,interruptions:[],calibrationLog:[],validationHistory:[],lastPredictionId:0});
@@ -219,6 +223,7 @@ async function saveObservation(button, status){
   const result=await response.json();
   if(!response.ok)throw new Error(result.error||'The summary could not be saved.');
   status.textContent='Saved. The coach and athlete can now see this summary.';
+  if(embeddedStudio)window.dispatchEvent(new CustomEvent('faraday:observation-saved',{detail:result.observation}));
  }catch(error){
   status.textContent=error.message;
   button.disabled=false;
@@ -230,11 +235,13 @@ function renderReview(){
  const visible=usable||state.mode==='pointer';$('#heatmap').hidden=!visible;if(visible)drawHeatmap();$('#heatToggle').onclick=()=>{const c=$('#heatmap');c.hidden=!c.hidden;if(!c.hidden)drawHeatmap();$('#heatToggle').textContent=c.hidden?'Show diagnostic heatmap':'Hide heatmap';};
  $('#regions').textContent=['reading','diagram','outside activity','missing'].map(r=>`${r}: ${state.samples.length?Math.round(state.samples.filter(s=>s.region===r).length/state.samples.length*100):0}%`).join(' · ');
  $('#json').onclick=()=>download('json');$('#csv').onclick=()=>download('csv');$('#again').onclick=()=>{state.preChecks=[];state.postCheck=null;chooseStory();if(state.invalidated)showCalibrationIntro();else showValidationIntro();};$('#clear').onclick=reset;message('○ Review ready · '+quality);
- if(location.pathname==='/pilot/studio'){
-  $('#regions').insertAdjacentHTML('afterend',`<div class="actions"><button class="solid" id="saveObservation">Save summary to athlete dashboard</button><a class="text-link" href="/pilot/#eye-tracking">Open eye-tracking dashboard →</a></div><p class="fine">Saving replaces the previous summary for this athlete. It shares quality and session counts with the coach and athlete. The heatmap, raw samples, and camera frames stay here.</p><p id="observationStatus" role="status"></p>`);
+ if(embeddedStudio||location.pathname==='/pilot/studio'){
+  const resultsLink=embeddedStudio?'<button type="button" class="secondary" id="showSavedObservation">View saved summary ↓</button>':'<a class="text-link" href="/pilot/#eye-tracking">Open eye-tracking dashboard →</a>';
+  $('#regions').insertAdjacentHTML('afterend',`<div class="actions"><button class="solid" id="saveObservation">Save summary to athlete dashboard</button>${resultsLink}</div><p class="fine">Saving replaces the previous shared summary. Export the session before closing the activity if you want to keep the full results.</p><p id="observationStatus" role="status"></p>`);
   const button=$('#saveObservation');
   const status=$('#observationStatus');
   button.onclick=()=>saveObservation(button,status);
+  if(embeddedStudio)$('#showSavedObservation').onclick=()=>$('#pilot-observation-card').focus();
  }
 }
 function drawHeatmap(){const c=$('#heatmap'),r=state.activityRect;c.width=r.width;c.height=r.height;const ctx=c.getContext('2d');for(const s of state.samples){if(!s.valid||s.activity_x<0||s.activity_x>r.width||s.activity_y<0||s.activity_y>r.height)continue;const x=s.activity_x,y=s.activity_y;const g=ctx.createRadialGradient(x,y,0,x,y,32);g.addColorStop(0,'rgba(201,86,50,.08)');g.addColorStop(.5,'rgba(219,153,61,.035)');g.addColorStop(1,'rgba(219,153,61,0)');ctx.fillStyle=g;ctx.fillRect(x-32,y-32,64,64);}}
@@ -247,7 +254,9 @@ $('#cancelTarget').onclick=cancelTargets;
 function reset(){hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;if(window.webgazer)webgazer.clearData();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='NO SESSION';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('○ Cleared · camera disconnected');}
 window.addEventListener('resize',()=>{if(!state.mode)return;state.invalidated=true;state.calibrated=false;state.preChecks=[];collecting=false;activeValidation=null;$('#overlay').hidden=true;$('#calStatus').textContent='Window changed';if(['review','postcheck','post-intro'].includes(state.phase)){state.postCheck=null;renderReview();}else if(['recording','paused'].includes(state.phase)){state.running=false;finish();}else showCalibrationIntro();message('○ Window changed · new calibration required');});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(!$('#overlay').hidden)cancelTargets();if(state.running)pauseRecording('Browser tab hidden');}});
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{if(state.running)pauseRecording('Left observation studio');document.querySelectorAll('.view').forEach(v=>v.hidden=v.id!==b.dataset.view);document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x===b));});
+const studioNav=document.querySelectorAll('nav button[data-view]');
+studioNav.forEach(b=>b.onclick=()=>{if(state.running)pauseRecording('Left observation studio');document.querySelectorAll('.view').forEach(v=>v.hidden=v.id!==b.dataset.view);studioNav.forEach(x=>x.classList.toggle('active',x===b));});
+if(embeddedStudio)window.addEventListener('faraday:close-studio',reset);
 window.addEventListener('beforeunload',stopCamera);
 setInterval(()=>{if(document.hidden)return;collectCalibration();collectValidation();},50);
 setup();state.raf=requestAnimationFrame(tick);

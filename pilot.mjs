@@ -240,7 +240,7 @@ export function createPilot(env = process.env, { localPreview = false } = {}) {
       if (role === 'parent') { json(res, 403, { error: 'This role cannot save an observation.' }); return true; }
       try {
         observation = observationSummary(await readJson(req), role);
-        json(res, 201, { savedAt: observation.savedAt });
+        json(res, 201, { observation });
       } catch (error) {
         json(res, 400, { error: error.message });
       }

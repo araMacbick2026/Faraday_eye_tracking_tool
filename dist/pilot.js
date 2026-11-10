@@ -12,6 +12,7 @@ const signIn = login.querySelector('button');
 const dashboard = document.querySelector('#pilot-dashboard');
 const status = document.querySelector('#pilot-status');
 const week = document.querySelector('#pilot-week');
+const period = document.querySelector('#pilot-period');
 const summary = document.querySelector('#pilot-summary');
 const forms = document.querySelector('#pilot-forms');
 const actions = document.querySelector('#pilot-actions');
@@ -22,6 +23,9 @@ const reportNav = document.querySelector('.pilot-report-nav');
 const addMeasurement = document.querySelector('#pilot-add-measurement');
 const observationSummary = document.querySelector('#pilot-observation-summary');
 const observationTab = reportNav.querySelector('[data-panel="observation"]');
+const studio = document.querySelector('#pilot-studio');
+const studioStatus = document.querySelector('#pilot-studio-status');
+const openStudio = document.querySelector('#pilot-open-studio');
 const panels = {
   report: document.querySelector('#pilot-report'),
   weekly: document.querySelector('#pilot-weekly'),
@@ -29,6 +33,7 @@ const panels = {
   entry: actions
 };
 let selectedPanel = location.hash === '#eye-tracking' ? 'observation' : 'report';
+let studioLoad;
 const roleLabels = { coach: 'Coach', athlete: 'Athlete', parent: 'Parent or guardian' };
 const demoNames = { coach: 'Taylor Reed', athlete: 'Alex Morgan', parent: 'Jamie Morgan' };
 const descriptions = {
@@ -95,11 +100,23 @@ function selectAction(type) {
 }
 
 function selectPanel(panel) {
+  if (panel !== 'observation') closeStudio();
   selectedPanel = panel;
+  week.closest('label').hidden = panel === 'observation';
+  period.hidden = panel === 'observation';
   for (const [key, section] of Object.entries(panels)) section.hidden = key !== panel;
   for (const button of reportNav.querySelectorAll('button')) {
     button.setAttribute('aria-pressed', String(button.dataset.panel === panel));
   }
+}
+
+function closeStudio() {
+  if (studio.hidden) return;
+  window.dispatchEvent(new Event('faraday:close-studio'));
+  studio.hidden = true;
+  studioStatus.textContent = '';
+  openStudio.disabled = false;
+  openStudio.setAttribute('aria-expanded', 'false');
 }
 
 function setMeasurementUnit() {
@@ -131,9 +148,11 @@ function renderObservation(observation) {
     'Median error after': pixels(observation.afterPx),
     'Pauses': observation.pauses
   };
-  observationSummary.innerHTML = '<p><strong>' + escape(observation.story) + '</strong> · ' +
-    escape(quality[observation.quality]) + '</p><p>Saved by ' + escape(roleLabels[observation.savedBy]) + ' · ' +
-    escape(new Date(observation.savedAt).toLocaleString()) + '</p><dl class="pilot-metric-change">' +
+  observationSummary.innerHTML = '<p class="pilot-observation-story"><strong>' + escape(observation.story) + '</strong> ' +
+    '<span class="pilot-observation-quality" data-quality="' + escape(observation.quality) + '">' +
+    escape(quality[observation.quality]) + '</span></p><p class="pilot-detail">Saved by ' +
+    escape(roleLabels[observation.savedBy]) + ' · ' + escape(new Date(observation.savedAt).toLocaleString()) +
+    '</p><dl class="pilot-metric-change pilot-observation-metrics">' +
     Object.entries(results).map(([label, value]) => '<div><dt>' + escape(label) + '</dt><dd>' + escape(value) + '</dd></div>').join('') + '</dl>';
 }
 
@@ -141,7 +160,7 @@ function render(data) {
   const { role, athlete, history, weekly, weekStart, weekEnd } = data;
   title.textContent = athlete.name + ' · ' + roleLabels[role] + ' view';
   document.querySelector('#pilot-intro').textContent = [athlete.team, athlete.position, athlete.season].filter(Boolean).join(' · ');
-  document.querySelector('#pilot-period').textContent = dateLabel(weekStart) + ' to ' + dateLabel(weekEnd);
+  period.textContent = dateLabel(weekStart) + ' to ' + dateLabel(weekEnd);
   week.value = weekStart;
   observationTab.hidden = role === 'parent';
   renderObservation(data.observation);
@@ -211,6 +230,7 @@ async function load(date) {
   } catch (error) {
     if (sequence !== loadSequence) return;
     if (error.status === 401 || error.status === 503) {
+      closeStudio();
       dashboard.hidden = true;
       welcome.hidden = false;
       summary.replaceChildren();
@@ -250,6 +270,32 @@ week.addEventListener('change', () => {
 reportNav.addEventListener('click', event => {
   const button = event.target.closest('[data-panel]');
   if (button) selectPanel(button.dataset.panel);
+});
+openStudio.addEventListener('click', async () => {
+  studio.hidden = false;
+  openStudio.disabled = true;
+  openStudio.setAttribute('aria-expanded', 'true');
+  studioStatus.textContent = 'Loading the observation desk…';
+  try {
+    studioLoad ??= Promise.all([import('/reliability.js?v=7'), import('/stories.js?v=7')])
+      .then(() => import('/app.js?v=9'));
+    await studioLoad;
+    if (!studio.hidden) {
+      studioStatus.textContent = '';
+      studio.focus();
+    }
+  } catch {
+    studioLoad = undefined;
+    closeStudio();
+    studioStatus.textContent = 'The observation desk could not load. Try again.';
+  }
+});
+document.querySelector('#pilot-close-studio').addEventListener('click', () => {
+  closeStudio();
+  openStudio.focus();
+});
+window.addEventListener('faraday:observation-saved', event => {
+  if (!dashboard.hidden && !observationTab.hidden) renderObservation(event.detail);
 });
 addMeasurement.addEventListener('click', () => {
   selectPanel('entry');
@@ -292,6 +338,7 @@ forms.addEventListener('submit', async event => {
 document.querySelector('#pilot-logout').addEventListener('click', async () => {
   try {
     await api('logout', {});
+    closeStudio();
     selectedAction = undefined;
     selectedPanel = 'report';
     actionStatus.textContent = '';

@@ -24,4 +24,4 @@ To enable the pilot on a hosted server, set distinct, randomly generated `PILOT_
 
 Set `PILOT_DEMO=true` to make the sign-in page the hosted landing page and load the fictional report-card and weekly sample data. This in-memory demo also accepts three distinct four-digit codes when `PILOT_DATA_FILE` is unset. Hosted users enter their role's access code manually.
 
-Coach and athlete can open **Eye tracking** from the dashboard. The studio review offers an explicit save for the latest observation summary. Only its story, session counts, and quality metrics are shared with those two roles. Raw samples, camera frames, and the heatmap stay in the studio. The saved summary is held in memory and resets on restart.
+Coach and athlete can run an activity and review its heatmap inside the dashboard's **Eye tracking** tab. Saving updates the latest observation card immediately. Only the story, session counts, and quality metrics are shared with those two roles. Export from the review to keep the full results. Closing the activity or switching tabs disconnects the camera and clears the in-page session. The saved summary is held in memory and resets on restart.
