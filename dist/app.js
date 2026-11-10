@@ -1,10 +1,12 @@
 'use strict';
 const $=s=>document.querySelector(s);
 const embeddedStudio=document.body?.classList.contains('pilot');
-const state={mode:null,phase:'setup',latest:null,calibrated:false,validation:null,samples:[],elapsed:0,running:false,epoch:0,viewport:null};
+const state={mode:null,phase:'setup',quickPreview:false,latest:null,calibrated:false,validation:null,samples:[],elapsed:0,running:false,epoch:0,viewport:null};
 let validationRows=[],activeValidation=null,calIndex=0,lastTick=0;
 const calibration=[[.1,.18],[.5,.18],[.9,.18],[.1,.5],[.5,.5],[.9,.5],[.1,.82],[.5,.82],[.9,.82]];
 const checks=[[.25,.3],[.75,.3],[.5,.55],[.25,.72],[.75,.72]];
+const previewCalibration=[[.12,.52],[.45,.52],[.88,.52]];
+const previewChecks=[[.24,.52],[.54,.52],[.76,.52]];
 const samplesPerTarget=15;
 const calibrationCapacity=(calibration.length+3)*samplesPerTarget;
 const quantile=(a,q)=>{if(!a.length)return null;const s=[...a].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.floor((s.length-1)*q))]};
@@ -121,24 +123,62 @@ function startMode(mode){if(mode==='pointer')stopCamera();state.mode=mode;state.
 document.addEventListener('pointermove',e=>{if(state.mode==='pointer')state.latest={x:e.clientX,y:e.clientY,t:now(),id:++state.sequence};});
 function pointerPrediction(){const p=state.latest;return p?{...p,t:now(),id:++state.sequence}:null;}
 function fresh(){const p=state.mode==='pointer'?pointerPrediction():state.latest;return p&&now()-p.t<R.limits.maxAgeMs&&Number.isFinite(p.x)&&Number.isFinite(p.y)?p:null;}
-function showCalibrationIntro(){phase('calibration',2);setDesk(`<div class="welcome"><div class="eyebrow">Step 2 · Set up the dots</div><h2>Look at each dot in turn</h2><p>Click a dot once, then look at its centre until it moves. Each dot takes about three seconds. Keep your head comfortably still.</p><p>${state.mode==='pointer'?'For pointer practice, move your pointer to each dot.':'If a dot stops moving, face the camera and hold still for a moment.'}</p><div class="actions"><button class="solid" id="calibrate">Start the nine dots</button><button class="secondary" id="reset">Disconnect camera</button></div></div>`);$('#calibrate').onclick=beginCalibration;$('#reset').onclick=reset;message('Ready to start the nine dots.');}
+function showCalibrationIntro(){
+ discardQuickPreview();
+ phase('calibration',2);
+ const camera=state.mode==='camera';
+ setDesk(`<div class="welcome"><p class="eyebrow">Step 2 · Set up the dots</p><h2>${camera?'Check how the camera sees your gaze':'Look at each dot in turn'}</h2>
+ <p>${camera?'Try a short left-to-right preview before the full setup. It takes about 20 seconds and can catch tracking problems early.':'Click each dot once and keep your pointer at the centre until it moves.'}</p>
+ ${camera?'<p>When setting up the dots, click each one once and look at its centre until it moves.</p>':''}
+ <div class="actions">${camera?'<button class="solid" id="quickPreview">Try quick preview</button>':''}<button class="${camera?'secondary':'solid'}" id="calibrate">Start the nine dots</button><button class="secondary" id="reset">${camera?'Disconnect camera':'End practice'}</button></div></div>`);
+ $('#calibrate').onclick=()=>beginCalibration();$('#reset').onclick=reset;
+ if(camera)$('#quickPreview').onclick=()=>beginCalibration(true);
+ message(camera?'Choose a preview or start the full setup.':'Ready to start the nine dots.');
+}
+function discardQuickPreview(){
+ if(!state.quickPreview)return;
+ state.quickPreview=false;state.calibrationLog=[];state.calibrationPoses=[];state.latest=null;
+ window.webgazer?.getRegression()[0]?.init();
+}
+function showPreviewCheckIntro(){
+ phase('preview-check',3);
+ setDesk('<div class="welcome"><p class="eyebrow">Quick preview</p><h2>Follow three dots with your eyes</h2><p>Look left, centre, and right as the dots appear. Keep looking at each dot until it moves. There’s no need to click.</p><div class="actions"><button class="solid" id="previewCheck">Check left, centre, and right</button><button class="secondary" id="skipPreview">Go to the nine dots</button></div></div>');
+ $('#previewCheck').onclick=()=>beginValidation('preview');
+ $('#skipPreview').onclick=()=>beginCalibration();
+}
+function showPreviewResult(result){
+ const feedback=R.previewFeedback(result,state.viewport.width);
+ discardQuickPreview();
+ phase('preview-result',3);
+ setDesk(`<div class="welcome"><p class="eyebrow">Quick preview</p><h2>${feedback.title}</h2><p>${feedback.text}</p>
+ <p>The full accuracy check comes after the nine-dot setup.</p>${targetMap(result)}<div class="actions">
+ <button class="solid" id="fullAfterPreview">Start the nine dots</button><button class="secondary" id="repeatPreview">Try the preview again</button>
+ <button class="secondary" id="pointerAfterPreview">Practise with pointer</button></div></div>`);
+ $('#fullAfterPreview').onclick=()=>beginCalibration();
+ $('#repeatPreview').onclick=()=>beginCalibration(true);
+ $('#pointerAfterPreview').onclick=()=>{reset();startMode('pointer');showActivity(true);};
+ message('Quick preview complete.');
+}
 function placeTarget(pt){$('#target').style.left=pt[0]*innerWidth+'px';$('#target').style.top=pt[1]*innerHeight+'px';}
-function beginCalibration(){
- refining=false;refinementStarted=false;calibrationPath=calibration.map((_,i)=>i);
+function beginCalibration(quick=false){
+ state.quickPreview=quick===true&&state.mode==='camera';
+ refining=false;refinementStarted=false;calibrationPath=(state.quickPreview?previewCalibration:calibration).map((_,i)=>i);
  phase('calibration',2);
  state.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};state.validation=null;state.preChecks=[];state.postCheck=null;state.calibrated=false;state.invalidated=false;state.baseline=null;state.calibrationLog=[];state.calibrationPoses=[];state.calibrationModel=null;
  $('#accuracy').textContent='—';if(state.mode==='camera')webgazer.getRegression()[0].init();calIndex=0;calSamples=0;collecting=false;$('#overlay').hidden=false;$('#target').disabled=false;$('#target').onclick=clickCalibration;calTarget();
 }
-function calTarget(){showCalibrationControls();collecting=false;calAnchor=null;calSamples=0;calLastFrame=0;placeTarget(calibration[calibrationPath[calIndex]]);$('#target').textContent='+';$('#targetInstruction').textContent=`${refining?'Refinement':'Calibration'} ${calIndex+1}/${calibrationPath.length} · Click once, then look steadily`;$('#targetProgress').textContent='Click the target to begin collecting';}
+function currentCalibrationPoint(){return (state.quickPreview?previewCalibration:calibration)[calibrationPath[calIndex]];}
+function calTarget(){showCalibrationControls();collecting=false;calAnchor=null;calSamples=0;calLastFrame=0;placeTarget(currentCalibrationPoint());$('#target').textContent='+';$('#targetInstruction').textContent=`${state.quickPreview?'Preview setup':refining?'Refinement':'Calibration'} ${calIndex+1}/${calibrationPath.length} · Click once, then look steadily`;$('#targetProgress').textContent='Click the target to start';}
 function clickCalibration(){if(collecting)return;collecting=true;state.trackerError=null;calAnchor=null;calLastProgressAt=now();calSettle=now()+700;calLastAt=0;$('#target').textContent='·';}
 function showCalibrationControls(){
  let controls=document.getElementById('calibrationControls');
  if(!controls){controls=document.createElement('div');controls.id='calibrationControls';controls.className='calibration-controls';controls.innerHTML='<button id="restartCalibration">Restart all 9 points</button><button id="reconnectCalibration">Reconnect camera</button><button id="exitCalibration">Cancel calibration</button>';$('#overlay').appendChild(controls);}
  controls.hidden=false;
- $('#restartCalibration').onclick=beginCalibration;$('#reconnectCalibration').onclick=reset;$('#exitCalibration').onclick=cancelTargets;
+ $('#restartCalibration').textContent=state.quickPreview?'Restart preview':'Restart all 9 points';
+ $('#restartCalibration').onclick=()=>beginCalibration(state.quickPreview);$('#reconnectCalibration').onclick=reset;$('#exitCalibration').onclick=cancelTargets;
 }
 function hideCalibrationControls(){const controls=document.getElementById('calibrationControls');if(controls)controls.hidden=true;}
-function calibrationStatus(text){$('#targetProgress').textContent=`${Math.round(calSamples/samplesPerTarget*100)}% done · ${text}`;}
+function calibrationStatus(text){$('#targetProgress').textContent=`${Math.round(calSamples/(state.quickPreview?6:samplesPerTarget)*100)}% done · ${text}`;}
 function collectCalibration(){
  if(!collecting||state.phase!=='calibration'||$('#overlay').hidden)return;
  if(now()-calLastProgressAt>=15000){collecting=false;$('#target').textContent='!';calibrationStatus('Collection stopped. Restart calibration, or reconnect the camera if it keeps stopping.');return;}
@@ -152,7 +192,7 @@ function collectCalibration(){
  }
  if(now()-calLastAt<130)return;
  if(state.mode==='camera'&&state.face.id===calLastFrame){calibrationStatus('Keep looking at the dot while the camera catches up');return;}
- const pt=calibration[calibrationPath[calIndex]],x=pt[0]*innerWidth,y=pt[1]*innerHeight;
+ const pt=currentCalibrationPoint(),x=pt[0]*innerWidth,y=pt[1]*innerHeight;
  if(state.mode==='camera'){
   calLastFrame=state.face.id;
   if(!webgazer.getRegression()[0].addData(state.face.patches,[x,y],'faraday-calibration')){
@@ -160,7 +200,7 @@ function collectCalibration(){
   }
  }
  calLastAt=now();calLastProgressAt=now();calSamples++;calibrationStatus('Keep looking at the centre');
- if(calSamples===samplesPerTarget){
+ if(calSamples===(state.quickPreview?6:samplesPerTarget)){
   state.calibrationLog.push({point:calibrationPath[calIndex]+1,refinement:refining,x,y,samples:calSamples});
   if(state.pose)state.calibrationPoses.push(state.pose);
   calIndex++;collecting=false;
@@ -171,9 +211,10 @@ function finishCalibration(){
  hideCalibrationControls();$('#overlay').hidden=true;
  if(state.mode==='camera'){
   const model=webgazer.getRegression()[0];
-  if(!model.fit()){
+  if(!model.fit(state.quickPreview?previewCalibration.length:calibration.length)){
    showCalibrationIntro();message('We couldn’t set up tracking. Start the nine dots again.');return;
   }
+  if(state.quickPreview){showPreviewCheckIntro();return;}
   state.calibrationModel={name:model.name,source:model.source,samples:model.sampleCount,heldOutMeanPx:model.calibrationError};
  }
  state.calibrated=true;
@@ -184,10 +225,11 @@ function finishCalibration(){
 function showValidationIntro(){phase('validation',3);setDesk(`<div class="welcome"><div class="eyebrow">Step 3 · Check accuracy</div><h2>${state.mode==='pointer'?'Move your pointer to each dot':'Follow the dots with your eyes'}</h2><p>${state.mode==='pointer'?'Keep your pointer at the centre of each dot until it moves.':'Look at the centre of each dot until it moves.'} There are five dots per check.</p><p>Two checks need to pass before you can read with the camera.</p><div class="actions"><button class="solid" id="validate">Start check ${state.preChecks.length+1} of 2</button><button class="secondary" id="recalibrate">Recalibrate</button></div></div>`);$('#validate').onclick=()=>beginValidation('pre');$('#recalibrate').onclick=showCalibrationIntro;}
 function beginValidation(purpose='pre'){hideCalibrationControls();checkPurpose=purpose;validationRows=[];checkIndex=0;phase(purpose==='post'?'postcheck':'validation',purpose==='post'?5:3);$('#overlay').hidden=false;$('#target').disabled=true;$('#target').textContent='·';$('#target').onclick=null;startCheckTarget();}
 function startCheckTarget(){
- if(checkIndex===checks.length){activeValidation=null;$('#overlay').hidden=true;finishValidation();return;}
- const pt=checks[checkIndex];placeTarget(pt);checkStarted=now();checkLastSlot=-1;checkLastId=0;
+ const points=checkPurpose==='preview'?previewChecks:checks;
+ if(checkIndex===points.length){activeValidation=null;$('#overlay').hidden=true;finishValidation();return;}
+ const pt=points[checkIndex];placeTarget(pt);checkStarted=now();checkLastSlot=-1;checkLastId=0;
  activeValidation={point:checkIndex+1,target:{x:pt[0]*innerWidth,y:pt[1]*innerHeight},errors:[],offsets:[],slots:60,freshSlots:0,uniquePredictions:[],missing:0};
- $('#targetInstruction').textContent=`${checkPurpose==='post'?'After-activity drift check':'Accuracy check '+(state.preChecks.length+1)+'/2'} · Target ${checkIndex+1}/5`;
+ $('#targetInstruction').textContent=`${checkPurpose==='preview'?'Quick preview':checkPurpose==='post'?'After-activity check':'Accuracy check '+(state.preChecks.length+1)+'/2'} · Dot ${checkIndex+1} of ${points.length}`;
  $('#targetProgress').textContent='Settle for one second, then look for three seconds · No clicking';
 }
 function collectValidation(){
@@ -209,6 +251,7 @@ function beginRefinement(){
 }
 function downloadValidation(){const report={schema:'faraday.validation.v1',exportedAt:new Date().toISOString(),mode:state.mode,thresholds:R.limits,viewport:state.viewport,calibration:state.calibrationLog,calibrationModel:state.calibrationModel??null,validation:state.validation,history:state.validationHistory,nonclinical:true};saveFile(JSON.stringify(report,null,2),'application/json',`faraday-validation-${Date.now()}.json`);}
 function finishValidation(){
+ if(checkPurpose==='preview'){showPreviewResult(R.summarize(validationRows,previewChecks.length));return;}
  const result={...R.summarize(validationRows,checks.length),purpose:checkPurpose,mode:state.mode,checkedAt:new Date().toISOString(),viewport:state.viewport};state.validationHistory.push(result);
  if(checkPurpose==='post'){state.postCheck=result;renderReview();return;}
  if(result.pass)state.preChecks.push(result);else state.preChecks=[];
@@ -332,9 +375,9 @@ function sessionReport(){return{schema:'faraday.observatory.v3',exportedAt:new D
 function exportContent(type){const report=sessionReport(),keys=['t_ms','prediction_id','prediction_age_ms','x','y','valid','available','reason','offscreen','activity_x','activity_y','region'];return type==='json'?JSON.stringify(report,null,2):['mode,quality,story_id,'+keys.join(','),...state.samples.map(s=>[state.mode,report.quality,state.story.id,...keys.map(k=>s[k]??'')].join(','))].join('\n');}
 function saveFile(content,mime,filename){const url=URL.createObjectURL(new Blob([content],{type:mime}));const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function download(type){saveFile(exportContent(type),type==='json'?'application/json':'text/csv',`faraday-${state.mode}-${state.story.id}-${Date.now()}.${type}`);}
-function cancelTargets(){hideCalibrationControls();collecting=false;activeValidation=null;$('#overlay').hidden=true;if(checkPurpose==='post'&&state.phase==='postcheck'){state.postCheck=null;renderReview();}else if(state.phase==='calibration')showCalibrationIntro();else showValidationIntro();}
+function cancelTargets(){hideCalibrationControls();collecting=false;activeValidation=null;$('#overlay').hidden=true;if(state.quickPreview||state.phase==='calibration')showCalibrationIntro();else if(checkPurpose==='post'&&state.phase==='postcheck'){state.postCheck=null;renderReview();}else showValidationIntro();}
 $('#cancelTarget').onclick=cancelTargets;
-function reset(){hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;window.webgazer?.getRegression()[0]?.init();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],calibrationLog:[],calibrationPoses:[],calibrationModel:null,activityRect:null,regions:[],viewport:null,validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='Choose a way to start';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('Camera disconnected.');}
+function reset(){hideCalibrationControls();state.epoch++;collecting=false;activeValidation=null;state.running=false;window.webgazer?.getRegression()[0]?.init();stopCamera();window.webgazer=undefined;trackerPromise=null;Object.assign(state,{mode:null,phase:'setup',quickPreview:false,latest:null,face:null,pose:null,baseline:null,calibrated:false,validation:null,preChecks:[],postCheck:null,samples:[],elapsed:0,story:null,invalidated:false,interruptions:[],calibrationLog:[],calibrationPoses:[],calibrationModel:null,activityRect:null,regions:[],viewport:null,validationHistory:[]});$('#overlay').hidden=true;$('#modeBadge').textContent='Choose a way to start';$('#source').textContent='Not connected';$('#calStatus').textContent='Not started';$('#accuracy').textContent='—';$('#sampleCount').textContent='0';setup();message('Camera disconnected.');}
 window.addEventListener('resize',()=>{if(!state.mode)return;state.calibrated=false;if(state.phase==='review')return;state.invalidated=true;state.preChecks=[];collecting=false;activeValidation=null;$('#overlay').hidden=true;$('#calStatus').textContent='Window changed';if(['postcheck','post-intro'].includes(state.phase)){state.postCheck=null;renderReview();}else if(['recording','paused'].includes(state.phase)){state.running=false;finish();}else showCalibrationIntro();message('The window size changed. Start the nine dots again.');});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(!$('#overlay').hidden)cancelTargets();if(state.running)pauseRecording('Browser tab hidden');}});
 const studioNav=document.querySelectorAll('nav button[data-view]');

@@ -155,3 +155,38 @@ partial.events.resize();
 assert.equal(partial.run('sessionQuality()'),'provisional-broad-region-only','A resize cannot rewrite a completed review');
 assert.equal(partial.run('state.calibrated'),false,'A new activity requires calibration for the new viewport');
 console.log('PASS: incomplete validation and short sessions stay gated, and completed reviews survive a resize.');
+
+const preview=environment();await preview.run('startCamera()');
+preview.get('#quickPreview').onclick();
+for(let point=0;point<3;point++){
+ preview.run('clickCalibration()');preview.advance(800);
+ for(let frame=0;frame<6;frame++){
+  preview.advance(140);
+  preview.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${point*6+frame+1},patches:{features:previewCalibration[${point}]}};state.stableSince=0;collectCalibration()`);
+ }
+}
+assert.equal(preview.stats().training,18);
+assert.equal(preview.run('state.calibrated'),false);
+preview.get('#previewCheck').onclick();
+for(let point=0;point<3;point++){
+ for(let slot=0;slot<60;slot++){
+  preview.advance(slot===0?1000:50);
+  preview.run(`state.face={x:.5,y:.5,scale:.2,t:now()};state.latest={x:activeValidation.target.x+5,y:activeValidation.target.y,t:now(),id:${point*60+slot+1}};collectValidation()`);
+ }
+ preview.advance(50);preview.run('collectValidation()');
+}
+assert.match(preview.get('#desk').innerHTML,/camera followed left, centre, and right/);
+assert.match(preview.get('#desk').innerHTML,/Accuracy map/);
+assert.equal(preview.run('state.preChecks.length'),0);
+assert.equal(preview.run('state.validationHistory.length'),0);
+assert.equal(preview.run('webgazer.getRegression()[0].sampleCount'),0);
+preview.get('#fullAfterPreview').onclick();
+assert.match(preview.get('#targetInstruction').textContent,/Calibration 1\/9/);
+const previewRows=(estimates,slots=60)=>r.summarize(estimates.map((x,i)=>{
+ const target={x:[240,540,760][i],y:300};
+ return {point:i+1,target,slots:60,freshSlots:slots,errors:Array(slots).fill(Math.abs(x-target.x)),offsets:Array(slots).fill({x:x-target.x,y:0})};
+}),3);
+assert.match(r.previewFeedback(previewRows([495,500,505]),1000).title,/near the centre/);
+assert.match(r.previewFeedback(previewRows([350,660,890]),1000).title,/to the right/);
+assert.match(r.previewFeedback(previewRows([240,540,760],5),1000).title,/missed some/);
+console.log('PASS: short camera preview distinguishes tracking patterns and is discarded before full calibration.');

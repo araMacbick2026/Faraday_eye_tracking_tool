@@ -80,11 +80,11 @@
         count++;
         return true;
       },
-      fit() {
+      fit(requiredTargets = minimumTargets) {
         const targets = [...groups.values()].map(({ point, samples }) => ({
           point, features: samples[0].map((_, i) => median(samples.map(sample => sample[i])))
         }));
-        if (targets.length < minimumTargets) return false;
+        if (targets.length < requiredTargets) return false;
         // Tune only on calibration targets. The separate accuracy checks never feed the model.
         const candidates = [0.01, 0.1, 1];
         let bestStrength = candidates[0], bestLoss = Infinity;
@@ -148,9 +148,9 @@
         const irisAccepted = irisModel.addData(patches, point, type);
         return pixelAccepted || irisAccepted;
       },
-      fit() {
-        const pixelsReady = patchesModel.fit();
-        const irisReady = irisModel.fit();
+      fit(requiredTargets = targetCount) {
+        const pixelsReady = patchesModel.fit(requiredTargets);
+        const irisReady = irisModel.fit(requiredTargets);
         // Prefer iris geometry if held-out calibration targets score comparably. Neither model sees accuracy-check targets.
         active = irisReady && (!pixelsReady || irisModel.calibrationError <= patchesModel.calibrationError * 1.1)
           ? irisModel : pixelsReady ? patchesModel : null;
