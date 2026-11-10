@@ -276,8 +276,8 @@ openStudio.addEventListener('click', async () => {
   openStudio.setAttribute('aria-expanded', 'true');
   studioStatus.textContent = 'Loading the observation desk…';
   try {
-    studioLoad ??= Promise.all([import('/reliability.js?v=7'), import('/stories.js?v=7')])
-      .then(() => import('/app.js?v=10'));
+    studioLoad ??= Promise.all([import('/reliability.js?v=9'), import('/stories.js?v=7'), import('/gaze-model.js?v=1')])
+      .then(() => import('/app.js?v=12'));
     await studioLoad;
     if (!studio.hidden) {
       studioStatus.textContent = '';

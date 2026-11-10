@@ -1,13 +1,12 @@
 import vm from 'node:vm';import fs from 'node:fs';import assert from 'node:assert/strict';
-const code=['dist/reliability.js','dist/stories.js','dist/app.js'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
+const code=['dist/reliability.js','dist/stories.js','dist/gaze-model.js','dist/app.js'].map(p=>fs.readFileSync(p,'utf8')).join('\n');
 function environment({media=true,policy=true,error=null}={}){
  let time=1000,stopped=0,began=0,training=0;const elements=new Map(),events={};
  const el=()=>({textContent:'',disabled:false,hidden:true,style:{},classList:{toggle(){}},remove(){},appendChild(child){elements.set('#'+child.id,child)},scrollIntoView(){},getBoundingClientRect(){return{x:0,y:0,width:600,height:440}},getContext(){return{createRadialGradient(){return{addColorStop(){}}},fillRect(){}}}});
  const get=s=>{if(!elements.has(s))elements.set(s,el());return elements.get(s)};
- const clickWindows=['screenXClicksArray','screenYClicksArray','eyeFeaturesClicks','dataClicks'];
- const ridge={init(){for(const key of clickWindows)this[key]={windowSize:50,data:[]};}};
- ridge.init();
- const tracker={params:{},getTracker(){return{getEyePatches:async()=>false}},getRegression(){return [ridge]},clearData(){ridge.init()},recordScreenPosition(x,y){training++;for(const key of clickWindows){const w=ridge[key];w.data.push([x,y]);if(w.data.length>w.windowSize)w.data.shift();}},saveDataAcrossSessions(){return this},async setCameraConstraints(c){this.constraints=c},setRegression(){return this},setGazeListener(){return this},async begin(){began++;if(error)throw error;return this},end(){throw new Error('partial start')},removeMouseEventListeners(){},showPredictionPoints(){},showVideoPreview(){}};
+ let regression={init(){},fit(){return true},addData(){training++;return true}};
+ let createRegression;
+ const tracker={params:{},util:{getEyeFeats:patches=>patches.features},getTracker(){return{getEyePatches:async()=>false}},getRegression(){return [regression]},addRegressionModule(_,create){createRegression=create},saveDataAcrossSessions(){return this},async setCameraConstraints(c){this.constraints=c},setRegression(){regression=new createRegression();const add=regression.addData;regression.addData=(...args)=>{const accepted=add(...args);if(accepted)training++;return accepted;};return this},setGazeListener(){return this},async begin(){began++;if(error)throw error;return this},end(){throw new Error('partial start')},removeMouseEventListeners(){},showPredictionPoints(){},showVideoPreview(){}};
  const window={webgazer:tracker,isSecureContext:true,addEventListener:(n,f)=>events[n]=f};
  const context={window,document:{baseURI:'https://example.test/',permissionsPolicy:{allowsFeature:()=>policy},querySelector:get,querySelectorAll:()=>[],createElement:()=>el(),getElementById:id=>id==='webgazerVideoFeed'?{srcObject:{getTracks:()=>[{stop(){stopped++}}]}}:(elements.get('#'+id)||null),addEventListener:(n,f)=>events[n]=f,head:{append(){}}},performance:{now:()=>time},URL,console:{warn(){}},setTimeout,clearTimeout,setInterval(){},requestAnimationFrame(){},navigator:{mediaDevices:media?{getUserMedia(){}}:undefined},location:{reload(){}},innerWidth:1200,innerHeight:800,devicePixelRatio:1};
  Object.defineProperty(context,'webgazer',{get:()=>window.webgazer});vm.createContext(context);vm.runInContext(code,context);
@@ -17,18 +16,20 @@ for(const [name,expected] of [['NotAllowedError','blocked'],['NotFoundError','No
 for(const config of [{media:false},{policy:false}]){const e=environment(config);await e.run('startCamera()');assert.equal(e.stats().began,0);}
 const success=environment();await success.run('startCamera()');assert.equal(success.tracker.params.faceMeshSolutionPath,'https://example.test/mediapipe/face_mesh/');assert.equal(success.run('state.mode'),'camera');
 const cal=environment();await cal.run('startCamera()');cal.run('beginCalibration();clickCalibration()');cal.advance(1000);cal.run('collectCalibration()');assert.equal(cal.stats().training,0,'No training without face');
-for(let point=0;point<9;point++){if(point)cal.run('clickCalibration()');cal.advance(800);for(let i=0;i<15;i++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${point*15+i+1}};state.stableSince=0;collectCalibration()`);}}
+for(let point=0;point<9;point++){if(point)cal.run('clickCalibration()');cal.advance(800);for(let i=0;i<15;i++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${point*15+i+1},patches:{features:${i===14?"[8,-9]":`calibration[${point}]`}}};state.stableSince=0;collectCalibration()`);}}
 assert.equal(cal.run('state.calibrated'),true);assert.equal(cal.stats().training,135);assert.equal(cal.run('state.calibrationLog.length'),9);
 const calibratedRidge=cal.tracker.getRegression()[0];
-assert.equal(calibratedRidge.eyeFeaturesClicks.data.length,135);
-assert.deepEqual(calibratedRidge.dataClicks.data[0],[120,144]);
+assert.equal(calibratedRidge.sampleCount,135);
+const estimate=calibratedRidge.predict({features:[.25,.3]});
+assert.ok(Math.hypot(estimate.x-300,estimate.y-240)<15,'A held-out screen position remains accurate');
+assert.equal(calibratedRidge.predict({features:[NaN,.3]}),null);
+assert.equal(calibratedRidge.addData({features:[.25,.3]},[300,240],'click'),false,'Ordinary clicks never train the model');
 cal.run("state.validation={targets:[{point:1,pass:false,median:350,target:{x:300,y:240}}]};beginRefinement()");
-for(let point=0;point<3;point++){cal.run('clickCalibration()');cal.advance(800);for(let frame=0;frame<15;frame++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${136+point*15+frame}};state.stableSince=0;collectCalibration()`);}}
-assert.equal(calibratedRidge.eyeFeaturesClicks.data.length,180);
-assert.deepEqual(calibratedRidge.dataClicks.data[0],[120,144]);
+for(let point=0;point<3;point++){cal.run('clickCalibration()');cal.advance(800);for(let frame=0;frame<15;frame++){cal.advance(140);cal.run(`state.face={x:.5,y:.5,scale:.2,t:now(),id:${136+point*15+frame},patches:{features:calibration[calibrationPath[${point}]]}};state.stableSince=0;collectCalibration()`);}}
+assert.equal(calibratedRidge.sampleCount,180);
 cal.run('beginRefinement()');assert.equal(cal.run('state.phase'),'validation');
-cal.run('beginCalibration()');assert.equal(calibratedRidge.dataClicks.data.length,0);assert.equal(calibratedRidge.dataClicks.windowSize,180);
-console.log('PASS: ridge retains the full nine-point calibration and one refinement, including the first target.');
+cal.run('beginCalibration()');assert.equal(calibratedRidge.sampleCount,0);assert.equal(calibratedRidge.predict({features:[.25,.3]}),null);
+console.log('PASS: centered regression retains the calibration and refinement, predicts a held-out point, and ignores ordinary clicks.');
 const r=success.context.window.Reliability;const good=()=>[1,2,3,4,5].map(point=>({point,slots:60,errors:Array(60).fill(20)}));
 assert.equal(r.summarize(good()).pass,true);let rows=good();rows[4].errors=Array(60).fill(400);assert.equal(r.summarize(rows).pass,false,'Bad corner fails despite low global median');rows=good();rows[0].errors=[20];assert.equal(r.summarize(rows).pass,false,'Sparse target fails');
 const v=environment();v.run("state.mode='pointer';beginValidation('pre')");for(let i=0;i<5;i++){for(let j=0;j<60;j++){v.advance(j===0?1000:50);v.run(`state.latest={x:activeValidation.target.x,y:activeValidation.target.y,t:now(),id:1};collectValidation()`);}v.advance(100);v.run('collectValidation()');}assert.equal(v.run('state.preChecks.length'),1);assert.equal(v.stats().training,0,'Validation must never train');
@@ -84,6 +85,11 @@ console.log('PASS: stalled 11/15 samples never advance; fresh-frame recovery; 15
 const monitor=environment();monitor.run("let shouldFail=true;const positions=Array.from({length:264},()=>[320,240,0]);positions[33]=[250,240,0];positions[263]=[390,240,0];const sensor={getPositions:()=>positions,getEyePatches:async()=>{if(shouldFail)throw new Error('temporary frame error');return {left:{},right:{}}}};webgazer.getTracker=()=>sensor;installFaceMonitor()");
 await monitor.run('sensor.getEyePatches(null,{width:640,height:480})');assert.equal(monitor.run('state.face'),null);assert.match(monitor.run('state.trackerError'),/temporary/);
 monitor.run('shouldFail=false');await monitor.run('sensor.getEyePatches(null,{width:640,height:480})');assert.equal(monitor.run('state.trackerError'),null);assert.equal(monitor.run('state.face.id'),1);
+await monitor.run("state.mode='camera'; const video={getVideoPlaybackQuality:()=>({totalVideoFrames:10})}; sensor.getEyePatches(video,{width:640,height:480})");
+monitor.run('ingest({x:100,y:100})');
+await monitor.run('sensor.getEyePatches(video,{width:640,height:480})');
+monitor.run('ingest({x:200,y:200})');
+assert.equal(monitor.run('state.latest.x'),100,'Duplicate video frames cannot masquerade as new estimates');
 console.log('PASS: transient face-model exception does not reject the tracking loop and clears after a good frame.');
 
 // Reproduce the reported point-2 failure: a new stable pose is normal at a new target.
@@ -107,3 +113,25 @@ console.log('PASS: 10 Hz tracker with fresh signal is not falsely marked missing
 const offsets=r.summarize([{point:1,slots:60,freshSlots:60,errors:Array(30).fill(50),offsets:[{x:-30,y:40},{x:-20,y:30},{x:-40,y:50}]}]);assert.equal(offsets.targets[0].offsetX,-30);assert.equal(offsets.targets[0].offsetY,40);
 const diag=environment();diag.run("state.mode='pointer';state.viewport={width:1200,height:800};validationRows=[{point:1,target:{x:300,y:240},slots:60,freshSlots:60,errors:Array(30).fill(350),offsets:Array(30).fill({x:350,y:0})}];finishValidation()");assert.match(diag.get('#desk').innerHTML,/Refine weak area/);assert.match(diag.get('#desk').innerHTML,/Download diagnostics/);assert.match(diag.get('#desk').innerHTML,/Accuracy map/);assert.equal(typeof diag.get('#retryCheck').onclick,'function');diag.get('#retryCheck').onclick();assert.equal(diag.run('state.phase'),'validation');
 console.log('PASS: signed offset summaries, target-map rendering, failed-check recovery and diagnostic controls.');
+
+const widespread=environment();
+widespread.run("state.mode='camera';state.calibrationLog=[{point:1,samples:15}];validationRows=[194,213,237,252,307].map((error,i)=>({point:i+1,slots:60,freshSlots:48,errors:Array(48).fill(error)}));finishValidation()");
+assert.match(widespread.get('#desk').innerHTML,/5 of 5 targets missed/);
+assert.doesNotMatch(widespread.get('#desk').innerHTML,/Refine weak area|Repeat accuracy check/);
+assert.equal(widespread.run('state.validation.pass'),false);
+widespread.get('#demoContinue').onclick();
+assert.equal(widespread.run('state.mode'),'pointer');
+assert.equal(widespread.run('state.validation'),null);
+assert.equal(widespread.run('state.calibrationLog.length'),0);
+assert.equal(widespread.run('state.phase'),'ready');
+console.log('PASS: widespread webcam error recommends full calibration and offers a separate pointer rehearsal.');
+
+const partial=environment();partial.run("state.mode='camera';validationRows=[{point:1,slots:60,freshSlots:60,errors:Array(30).fill(20)}];finishValidation()");
+assert.equal(partial.run('state.preChecks.length'),0);
+partial.run("state.phase='review';state.validation={pass:true,median:20};state.preChecks=[state.validation,state.validation];state.postCheck={pass:true,median:30};state.samples=Array(10).fill({valid:true,available:true});state.elapsed=2000");
+assert.equal(partial.run('sessionQuality()'),'not-suitable-for-interpretation');
+partial.run('state.elapsed=5000');
+partial.events.resize();
+assert.equal(partial.run('sessionQuality()'),'provisional-broad-region-only','A resize cannot rewrite a completed review');
+assert.equal(partial.run('state.calibrated'),false,'A new activity requires calibration for the new viewport');
+console.log('PASS: incomplete validation and short sessions stay gated, and completed reviews survive a resize.');

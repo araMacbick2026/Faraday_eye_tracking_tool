@@ -1,12 +1,24 @@
 (function(root){
  const limits={medianPx:120,p90Px:200,coverage:.7,minSamples:10,driftPx:60,maxAgeMs:250,positionDisplacement:.12,positionScaleFraction:.35,positionSustainedMs:1000};
- function q(a,p){if(!a.length)return null;const b=[...a].sort((x,y)=>x-y);return b[Math.min(b.length-1,Math.floor((b.length-1)*p))]}
- function summarize(rows){const targets=rows.map(r=>{const median=q(r.errors,.5),p90=q(r.errors,.9),coverage=r.slots?(r.freshSlots??r.errors.length)/r.slots:0;return {...r,median,p90,coverage,offsetX:q((r.offsets||[]).map(p=>p.x),.5),offsetY:q((r.offsets||[]).map(p=>p.y),.5),predictionsPerSecond:r.errors.length/3,pass:median!==null&&median<=limits.medianPx&&p90<=limits.p90Px&&coverage>=limits.coverage&&r.errors.length>=limits.minSamples}});const errors=rows.flatMap(r=>r.errors),slots=rows.reduce((n,r)=>n+r.slots,0);return {median:q(errors,.5),p90:q(errors,.9),coverage:slots?rows.reduce((n,r)=>n+(r.freshSlots??r.errors.length),0)/slots:0,targets,pass:targets.length>0&&targets.every(r=>r.pass)}}
- function diagnose(v){const messages=[];if(v.targets.some(t=>t.coverage<limits.coverage))messages.push('Fresh signal is missing too often. Keep your face visible and close other camera or heavy browser apps.');if(v.targets.some(t=>t.errors.length<limits.minSamples))messages.push('Too few independent predictions. Recheck after closing other tabs; capture rate is reported separately from signal coverage.');const bad=v.targets.filter(t=>t.median!==null&&(t.median>limits.medianPx||t.p90>limits.p90Px));if(bad.length)messages.push('Position error is high at target'+(bad.length>1?'s ':' ')+bad.map(t=>t.point).join(', ')+'. Refine the nearby calibration area, then run a new independent check.');if(!messages.length)messages.push('All target criteria passed. Confirm with the next independent check.');return messages;}
+ function q(a,p){if(!a.length)return null;const b=[...a].sort((x,y)=>x-y),i=(b.length-1)*p;return b[Math.floor(i)]+(b[Math.ceil(i)]-b[Math.floor(i)])*(i%1);}
+ function summarize(rows,expectedCount=rows.length){const targets=rows.map(r=>{const median=q(r.errors,.5),p90=q(r.errors,.9),coverage=r.slots?(r.freshSlots??r.errors.length)/r.slots:0;return {...r,median,p90,coverage,offsetX:q((r.offsets||[]).map(p=>p.x),.5),offsetY:q((r.offsets||[]).map(p=>p.y),.5),predictionsPerSecond:r.errors.length/3,pass:median!==null&&median<=limits.medianPx&&p90<=limits.p90Px&&coverage>=limits.coverage&&r.errors.length>=limits.minSamples}});const errors=rows.flatMap(r=>r.errors),slots=rows.reduce((n,r)=>n+r.slots,0);const complete=targets.length===expectedCount&&new Set(targets.map(t=>t.point)).size===expectedCount;return {median:q(errors,.5),p90:q(errors,.9),coverage:slots?rows.reduce((n,r)=>n+(r.freshSlots??r.errors.length),0)/slots:0,targets,complete,pass:complete&&targets.length>0&&targets.every(r=>r.pass)}}
+ function positionFailures(v){return v.targets.filter(t=>t.median!==null&&(t.median>limits.medianPx||t.p90>limits.p90Px));}
+ function widespreadPositionError(v){return positionFailures(v).length>=3;}
+ function diagnose(v){
+  const messages=[];
+  if(v.complete===false)messages.push('This check did not cover all five targets. Run a complete accuracy check.');
+  if(v.targets.some(t=>t.coverage<limits.coverage))messages.push('Fresh signal is missing too often. Keep your face visible and close other camera or heavy browser apps.');
+  if(v.targets.some(t=>t.errors.length<limits.minSamples))messages.push('Too few independent predictions. Recheck after closing other tabs; capture rate is reported separately from signal coverage.');
+  const bad=positionFailures(v);
+  if(widespreadPositionError(v))messages.push(`${bad.length} of ${v.targets.length} targets missed the position limits. Centre the webcam, use even lighting from the front, and keep your position steady while recalibrating all nine points. If the next run still fails, download the diagnostics or try the story with pointer rehearsal.`);
+  else if(bad.length)messages.push('Position error is high at target'+(bad.length>1?'s ':' ')+bad.map(t=>t.point).join(', ')+'. Refine the nearby calibration area, then run a new independent check.');
+  if(!messages.length)messages.push('All target criteria passed. Confirm with the next independent check.');
+  return messages;
+ }
  function refinementPoints(target,points){return points.map((p,i)=>({i,d:Math.hypot(p[0]-target.x,p[1]-target.y)})).sort((a,b)=>a.d-b.d).slice(0,3).map(p=>p.i);}
  function movement(a,b){return !a||!b||Math.hypot(a.x-b.x,a.y-b.y)>.055||Math.abs(a.scale/b.scale-1)>.18}
  function positionChanged(a,b){return !!(a&&b&&(Math.hypot(a.x-b.x,a.y-b.y)>limits.positionDisplacement||Math.abs(a.scale/b.scale-1)>limits.positionScaleFraction))}
  function choose(stories,previous,random=Math.random){const choices=stories.filter(s=>s.id!==previous);return choices[Math.min(choices.length-1,Math.floor(random()*choices.length))]||stories[0]}
- function quality(mode,pre,post,coverage,invalidated){if(mode==='pointer')return 'rehearsal-not-gaze';if(invalidated||!pre?.pass||!post?.pass||coverage<limits.coverage||post.median-pre.median>limits.driftPx)return 'not-suitable-for-interpretation';return 'provisional-broad-region-only'}
- root.Reliability={limits,q,summarize,diagnose,refinementPoints,movement,positionChanged,choose,quality};
+ function quality(mode,pre,post,coverage,invalidated){if(mode==='pointer')return 'rehearsal-not-gaze';if(invalidated||!pre?.pass||!post?.pass||![pre.median,post.median,coverage].every(Number.isFinite)||coverage<limits.coverage||post.median-pre.median>limits.driftPx)return 'not-suitable-for-interpretation';return 'provisional-broad-region-only'}
+ root.Reliability={limits,q,summarize,diagnose,positionFailures,widespreadPositionError,refinementPoints,movement,positionChanged,choose,quality};
 })(typeof window==='undefined'?globalThis:window);
