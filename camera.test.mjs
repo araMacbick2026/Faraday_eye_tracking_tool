@@ -61,7 +61,12 @@ const moved=environment();moved.run("state.mode='camera';state.running=true;stat
 const blocked=environment();blocked.run("state.mode='camera';state.preChecks=[];showActivity(true)");assert.equal(blocked.run('state.phase'),'calibration','Failed prechecks block recording');
 const review=environment();review.run("state.mode='camera';chooseStory();state.samples=[];state.activityRect={width:600,height:440};renderReview()");assert.equal(review.get('#heatmap').hidden,true);assert.match(review.get('#desk').innerHTML,/Tracking couldn’t be verified/);assert.equal(review.run('sessionReport().schema'),'faraday.observatory.v3');
 const stories=success.context.window.STORIES;assert.equal(stories.length,6);assert.equal(new Set(stories.map(s=>s.id)).size,6);for(const s of stories){assert.notEqual(r.choose(stories,s.id,()=>0).id,s.id);assert.ok(s.paragraphs.length===3&&s.question&&s.diagram.length===3);}
-const css=fs.readFileSync('dist/style.css','utf8');assert.ok(+css.match(/#overlay\{[^}]*z-index:(\d+)/)[1]>+css.match(/#webgazerVideoContainer\{[^}]*z-index:(\d+)/)[1]);
+const css = fs.readFileSync('dist/style.css', 'utf8');
+const overlayZIndex = css.match(/^\s*#overlay\s*\{[^}]*?\bz-index\s*:\s*(-?\d+)/m);
+const webcamZIndex = css.match(/^\s*#webgazerVideoContainer\s*\{[^}]*?\bz-index\s*:\s*(-?\d+)/m);
+assert.ok(overlayZIndex, 'Calibration overlay declares a z-index');
+assert.ok(webcamZIndex, 'Webcam preview declares a z-index');
+assert.ok(Number(overlayZIndex[1]) > Number(webcamZIndex[1]), 'Calibration overlay appears above webcam preview');
 console.log('PASS: camera recovery; 9-point/135-sample gated calibration; independent validation; per-target quality gates; drift/coverage rules; unique/stale/gap accounting; signal/movement pauses; recording block; failed heatmap hidden; exports; 6 randomized stories; overlay ordering.');
 
 

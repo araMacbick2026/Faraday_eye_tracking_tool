@@ -27,3 +27,10 @@ Set `PILOT_DEMO=true` to make the sign-in page the hosted landing page and load 
 For a shareable demo with no access codes, also set `PILOT_OPEN_DEMO=true` and leave `PILOT_DATA_FILE` unset. The open demo has Coach, Athlete, and Parent views. The read-only Parent view opens on weekly sports and academic progress, with nutrition shown when enabled. Each browser starts with its own sample data and keeps its changes when switching roles. Demo changes expire with the session or service restart.
 
 Coach and athlete can run an activity and review its heatmap inside the dashboard's **Eye tracking** tab. Saving updates the latest observation card immediately. Only the story, session counts, and quality metrics are shared with those two roles. Export from the review to keep the full results. Closing the activity or switching tabs disconnects the camera and clears the in-page session. The saved summary is held in memory and resets on restart.
+
+## Maintain the interface
+
+- **Page structure** lives in `dist/index.html` (observation studio) and `dist/pilot.html` (athlete dashboard).
+- **Colors, typography, spacing and the shared banner** live in `dist/assets/ui/tokens.css`. Page layout lives in `dist/assets/ui/studio.css` and `dist/assets/ui/pilot.css`. Shared reading and calibration styles live in `dist/style.css`.
+- **Brand and tracking assets** are served locally from `dist/faraday-orbit.png`, `dist/mediapipe/` and `dist/vendor/`. The banner uses CSS and the interface uses system font fallbacks, so no external asset requests are required.
+- **Local review** uses `npm start` for the studio at `http://localhost:8080/` or `npm run pilot:preview` for the dashboard at `http://127.0.0.1:4180/`. Run `npm test` before sharing changes.

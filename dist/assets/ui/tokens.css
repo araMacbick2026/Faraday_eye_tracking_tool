@@ -1,0 +1,64 @@
+:root {
+  --paper: #f2f5f2;
+  --surface: #fff;
+  --ink: #14241e;
+  --muted: #4d6258;
+  --line: #d7e2db;
+  --panel: #e8f1eb;
+  --green: #176246;
+  --mint: #a9eed1;
+  --field-line: #789589;
+  --warning: #8d422b;
+  --warning-paper: #f7ece4;
+  --forest: #112f25;
+  --radius: 14px;
+  --shadow: 0 2px 5px rgb(16 45 35 / 5%);
+  --font-ui: "Inter", system-ui, sans-serif;
+  --font-display: "Instrument Serif", Georgia, serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 4px;
+}
+
+.feature-banner {
+  display: grid;
+  align-content: center;
+  min-height: 190px;
+  margin: 0 0 24px;
+  padding: clamp(22px, 4vw, 42px);
+  border-radius: var(--radius);
+  color: white;
+  background:
+    radial-gradient(circle at 82% 48%, #a9eed1 0 3px, transparent 4px),
+    repeating-radial-gradient(ellipse 160px 88px at 82% 48%, transparent 0 23px, #a9eed132 24px 25px, transparent 26px 38px),
+    linear-gradient(110deg, var(--forest) 55%, #205541);
+  background-size: 100% 100%, 46% 100%, 100% 100%;
+  background-position: right, right, left;
+  background-repeat: no-repeat;
+  overflow-wrap: anywhere;
+}
+
+.feature-banner h1 {
+  margin: 6px 0 10px;
+  letter-spacing: -.035em;
+}
+
+.feature-banner p {
+  max-width: 50ch;
+  margin: 0;
+  color: #d9eae1;
+}
+
+.feature-banner .eyebrow {
+  color: var(--mint);
+  text-transform: uppercase;
+}
+
+@media (max-width: 680px) {
+  .feature-banner {
+    min-height: 155px;
+    background-image: linear-gradient(110deg, var(--forest), #205541);
+  }
+}
